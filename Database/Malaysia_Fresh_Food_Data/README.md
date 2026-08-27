@@ -43,6 +43,8 @@ Every one of the 612 shelf-life rows contains a non-empty public `source_url`. F
 
 The review CSV is a third-party structured mirror and must not be described as an official USDA CSV. The official USDA formats are XLS and JSON; the official catalogue is the primary citation.
 
+In this project, `confidence` records source authority. HIGH includes official structured FoodKeeper records, the published NCHFP storage table and direct authoritative product or safety evidence. MEDIUM indicates government, food-safety or university guidance with an unresolved numeric locator, product-group mapping or temperature limitation. LOW is reserved for non-authoritative, unidentified or missing sources. Match granularity is recorded separately in `evidence_classification` and `source_locator`.
+
 ## FoodKeeper replacement summary
 
 - Product names and product IDs were not changed.
