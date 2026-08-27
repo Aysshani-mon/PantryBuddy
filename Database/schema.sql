@@ -227,23 +227,36 @@ CREATE TABLE inventory_transactions (
 
 -- ------------------------------------------------------------
 -- 10. shelf_life_rules
---     Suggested shelf-life ranges per category and storage type.
+--     Shelf-life rules with evidence metadata. Supports both
+--     product-level rules (product_id NOT NULL) and category-level
+--     fallback rules (product_id IS NULL).
 -- ------------------------------------------------------------
 CREATE TABLE shelf_life_rules (
-  rule_id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  category_id     INT UNSIGNED    NOT NULL,
-  storage_type_id TINYINT UNSIGNED NOT NULL,
-  min_days        INT UNSIGNED    NOT NULL,
-  max_days        INT UNSIGNED    NOT NULL,
-  source          VARCHAR(255)    NOT NULL,
-  created_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at      DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  rule_id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  category_id             INT UNSIGNED    NOT NULL,
+  product_id              BIGINT UNSIGNED NULL,
+  storage_type_id         TINYINT UNSIGNED NOT NULL,
+  min_days                INT UNSIGNED    NOT NULL,
+  max_days                INT UNSIGNED    NOT NULL,
+  recommended_days        DECIMAL(5,1)    NULL,
+  rule_status             ENUM('AVAILABLE','QUALITATIVE_ONLY','NOT_RECOMMENDED') NOT NULL DEFAULT 'AVAILABLE',
+  confidence              ENUM('HIGH','MEDIUM','LOW') NULL,
+  evidence_classification VARCHAR(50)     NULL,
+  source_name             VARCHAR(255)    NOT NULL,
+  source_url              VARCHAR(500)    NULL,
+  source_locator          VARCHAR(500)    NULL,
+  source_value_text       TEXT            NULL,
+  handling_notes          TEXT            NULL,
+  created_at              DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at              DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (rule_id),
-  UNIQUE KEY uq_shelf_life_rules_category_storage (category_id, storage_type_id),
+  UNIQUE KEY unique_product_storage (product_id, storage_type_id),
   CONSTRAINT chk_shelf_life_rules_min_days CHECK (min_days >= 0),
   CONSTRAINT chk_shelf_life_rules_max_days CHECK (max_days >= min_days),
   CONSTRAINT fk_shelf_life_rules_category FOREIGN KEY (category_id)
     REFERENCES product_categories (category_id) ON DELETE CASCADE,
+  CONSTRAINT fk_shelf_life_rules_product FOREIGN KEY (product_id)
+    REFERENCES products (product_id) ON DELETE CASCADE,
   CONSTRAINT fk_shelf_life_rules_storage FOREIGN KEY (storage_type_id)
     REFERENCES storage_types (storage_type_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -14,7 +14,9 @@
 --     script is repeatable without leaving test data behind.
 --   * Consume/discard operations lock rows with SELECT ... FOR UPDATE
 --     to simulate concurrent-safe stock updates.
---   * Scenario 32 is the only block without a transaction because
+--   * Shelf-life lookup tests (scenarios 13-15) verify the rule
+--     priority and fallback behavior of shelf_life_rules.
+--   * Scenario 35 is the only block without a transaction because
 --     DDL statements cause implicit commits in MySQL.
 -- ============================================================
 
@@ -242,7 +244,92 @@ LIMIT 3;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 13: Static shelf-life calculation support
+-- SCENARIO 13: Product-level rule priority over category-level rule
+-- When a product has its own rule in shelf_life_rules, the lookup
+-- must choose the product-level rule before the category fallback.
+-- ============================================================
+START TRANSACTION;
+
+-- Product 24 (Mango) is a Fruit product with a product-level PANTRY
+-- rule; Fruits also has a category-level fallback for PANTRY. The
+-- lookup orders product-level rules first (priority 0).
+SELECT rule_id, product_id, category_id, storage_type_id,
+       min_days, max_days, recommended_days,
+       CASE WHEN product_id IS NOT NULL THEN 0 ELSE 1 END AS priority
+FROM shelf_life_rules
+WHERE (product_id = 24 OR (product_id IS NULL AND category_id = 5))
+  AND storage_type_id = 3
+ORDER BY priority, rule_id;
+-- Expected: product-level rule (product_id = 24) first,
+--           category-level fallback (product_id IS NULL) second
+
+SELECT COUNT(*) AS product_rules
+FROM shelf_life_rules
+WHERE product_id = 24 AND storage_type_id = 3;
+-- Expected: 1 (exactly one product-level rule for Mango in PANTRY)
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 14: Category-level fallback when no product-level rule exists
+-- If a product has no product-level rule, the lookup must fall back
+-- to the category-level rule (product_id IS NULL).
+-- ============================================================
+START TRANSACTION;
+
+-- Temporarily remove Mango's product-level PANTRY rule to simulate
+-- the "no product-level rule" case. The DELETE is rolled back below.
+DELETE FROM shelf_life_rules
+WHERE product_id = 24 AND storage_type_id = 3;
+
+SELECT rule_id, product_id, category_id, storage_type_id,
+       min_days, max_days, recommended_days,
+       CASE WHEN product_id IS NOT NULL THEN 0 ELSE 1 END AS priority
+FROM shelf_life_rules
+WHERE (product_id = 24 OR (product_id IS NULL AND category_id = 5))
+  AND storage_type_id = 3
+ORDER BY priority, rule_id
+LIMIT 1;
+-- Expected: exactly 1 row, the category-level fallback
+--           (product_id IS NULL, category_id = 5, storage_type_id = 3)
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 15: Non-fresh items ignore rules even when expiry is missing
+-- Items in non-fresh categories (is_fresh_food = FALSE) must never
+-- receive a calculated expiry date. Their categories only contain
+-- NOT_RECOMMENDED placeholder rules (0/0 days).
+-- ============================================================
+START TRANSACTION;
+
+SELECT c.category_name, r.rule_status, r.min_days, r.max_days, r.recommended_days
+FROM product_categories c
+JOIN shelf_life_rules r ON r.category_id = c.category_id AND r.product_id IS NULL
+WHERE c.is_fresh_food = FALSE
+ORDER BY c.category_name, r.storage_type_id;
+-- Expected: only NOT_RECOMMENDED placeholder rules with 0/0 days
+
+-- Simulate a snack item with no expiry date (source CALCULATED but no
+-- production date or shelf-life days provided).
+INSERT INTO inventory_items
+  (team_id, product_id, storage_type_id, created_by, quantity,
+   purchase_date, expiry_date_source, expiry_date)
+VALUES (1, 11, 3, 1, 1.00, CURDATE(), 'CALCULATED', NULL);
+
+-- The lookup for the Snacks category returns only the placeholder rule,
+-- so the application must NOT calculate an expiry date.
+SELECT r.rule_status, r.min_days, r.max_days
+FROM shelf_life_rules r
+WHERE r.category_id = (SELECT category_id FROM products WHERE product_id = 11)
+  AND r.product_id IS NULL
+  AND r.storage_type_id = 3;
+-- Expected: 1 row with rule_status 'NOT_RECOMMENDED'
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 16: Static shelf-life calculation support
 -- Verify that CALCULATED expiry dates equal
 -- production_date + shelf_life_days, both for a new insert and
 -- for seed items.
@@ -273,7 +360,7 @@ WHERE expiry_date_source = 'CALCULATED';
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 14: Partial consumption
+-- SCENARIO 17: Partial consumption
 -- Lock the row, record a CONSUME transaction for part of the stock
 -- and reduce the quantity. The transaction is rolled back afterwards.
 -- ============================================================
@@ -305,7 +392,7 @@ LIMIT 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 15: Full consumption
+-- SCENARIO 18: Full consumption
 -- Consume the entire stock of an item and mark it CONSUMED.
 -- ============================================================
 START TRANSACTION;
@@ -334,7 +421,7 @@ WHERE inventory_item_id = 5;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 16: Over-consumption rejection
+-- SCENARIO 19: Over-consumption rejection
 -- Consuming more than the available quantity must be rejected.
 -- The conditional UPDATE affects 0 rows, which is how the
 -- application layer detects and rejects over-consumption.
@@ -362,7 +449,7 @@ WHERE inventory_item_id = 5;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 17: Discard
+-- SCENARIO 20: Discard
 -- Discard an item and record the DISCARD transaction with a
 -- non-NULL discard_reason.
 -- ============================================================
@@ -396,7 +483,7 @@ LIMIT 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 18: Expired discard
+-- SCENARIO 21: Expired discard
 -- Discard an item because it was found expired.
 -- ============================================================
 START TRANSACTION;
@@ -428,7 +515,7 @@ LIMIT 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 19: User-discarded item
+-- SCENARIO 22: User-discarded item
 -- Discard an item because the user no longer wants it.
 -- ============================================================
 START TRANSACTION;
@@ -460,7 +547,7 @@ LIMIT 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 20: Invalid FK rejection
+-- SCENARIO 23: Invalid FK rejection
 -- Inserting an inventory item with a non-existent team, product or
 -- creator must fail because of the foreign key constraints.
 -- ============================================================
@@ -487,7 +574,7 @@ VALUES (1, 999999, 1, 1, 1.00, CURDATE(), 'PACKAGING');
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 21: Product search
+-- SCENARIO 24: Product search
 -- Verify that products can be searched by name (case-insensitive
 -- thanks to the utf8mb4_unicode_ci collation).
 -- ============================================================
@@ -506,7 +593,7 @@ WHERE LOWER(product_name) LIKE '%milk%';
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 22: Inventory filtering
+-- SCENARIO 25: Inventory filtering
 -- Verify that inventory can be filtered by team, status and storage.
 -- ============================================================
 START TRANSACTION;
@@ -524,7 +611,7 @@ ORDER BY i.expiry_date;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 23: Home summary queries
+-- SCENARIO 26: Home summary queries
 -- Verify aggregate queries used by the home screen: totals per team,
 -- status counts and items expiring within the next 7 days.
 -- ============================================================
@@ -557,7 +644,7 @@ ORDER BY i.expiry_date;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 24: Reminder creation
+-- SCENARIO 27: Reminder creation
 -- Verify that a reminder can be created for an inventory item.
 -- ============================================================
 START TRANSACTION;
@@ -577,7 +664,7 @@ WHERE reminder_id = @test_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 25: Default 3-day reminder
+-- SCENARIO 28: Default 3-day reminder
 -- Verify that omitting lead_time_days uses the default value of 3
 -- and that reminder_at is derived from the expiry date.
 -- ============================================================
@@ -602,7 +689,7 @@ WHERE r.reminder_id = @default_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 26: Custom reminder lead time
+-- SCENARIO 29: Custom reminder lead time
 -- Verify that a reminder supports a custom lead time (e.g. 7 days).
 -- ============================================================
 START TRANSACTION;
@@ -625,7 +712,7 @@ WHERE r.reminder_id = @custom_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 27: Reminder cancellation
+-- SCENARIO 30: Reminder cancellation
 -- Verify that a reminder can be cancelled and records cancelled_at.
 -- ============================================================
 START TRANSACTION;
@@ -649,7 +736,7 @@ WHERE reminder_id = @cancel_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 28: Multiple notification recipients
+-- SCENARIO 31: Multiple notification recipients
 -- Verify that a reminder can notify several users at once.
 -- ============================================================
 START TRANSACTION;
@@ -673,7 +760,7 @@ GROUP BY r.reminder_id;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 29: Independent read/unread state
+-- SCENARIO 32: Independent read/unread state
 -- Verify that each recipient has its own read state; marking one
 -- recipient as read must not affect the others.
 -- ============================================================
@@ -703,11 +790,12 @@ ORDER BY user_id;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 30: Foreign-key delete behavior
+-- SCENARIO 33: Foreign-key delete behavior
 -- Verify CASCADE (team deletion removes members, inventory,
--- reminders and recipients), SET NULL (deleting a reviewer keeps
--- the request but clears reviewed_by) and RESTRICT (deleting a
--- referenced category or user fails).
+-- reminders and recipients; product deletion removes product-level
+-- shelf-life rules), SET NULL (deleting a reviewer keeps the request
+-- but clears reviewed_by) and RESTRICT (deleting a referenced
+-- category or user fails).
 -- ============================================================
 START TRANSACTION;
 
@@ -742,6 +830,19 @@ SELECT COUNT(*) AS remaining_recipients
 FROM notification_recipients WHERE reminder_id = @temp_reminder;
 -- Expected: all counts are 0 (cascade chain works)
 
+-- --- CASCADE: deleting a product removes its product-level rules --
+SELECT COUNT(*) AS product_rules_before
+FROM shelf_life_rules
+WHERE product_id = 24;
+-- Expected: 3 (FRIDGE, FREEZER, PANTRY)
+
+DELETE FROM products WHERE product_id = 24;
+
+SELECT COUNT(*) AS product_rules_after
+FROM shelf_life_rules
+WHERE product_id = 24;
+-- Expected: 0 (product-level rules cascade with the product)
+
 -- --- SET NULL: deleting a reviewer clears reviewed_by ------------
 INSERT INTO users (email, password_hash, display_name)
 VALUES ('temp.reviewer@example.com', '$2b$12$TEMP_REVIEWER_HASH_0000', 'Temp Reviewer');
@@ -771,7 +872,7 @@ DELETE FROM users WHERE user_id = 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 31: Seed data loading
+-- SCENARIO 34: Seed data loading
 -- Verify that seed_data.sql populated every table with the
 -- expected minimum number of rows.
 -- ============================================================
@@ -795,14 +896,19 @@ SELECT IF(COUNT(*) >= 3, 'PASS', 'FAIL') AS min_users_check FROM users;
 SELECT IF(COUNT(*) >= 2, 'PASS', 'FAIL') AS min_teams_check FROM teams;
 SELECT IF(COUNT(*) = 9, 'PASS', 'FAIL') AS categories_check FROM product_categories;
 SELECT IF(COUNT(*) = 3, 'PASS', 'FAIL') AS storage_types_check FROM storage_types;
+SELECT IF(COUNT(*) >= 100, 'PASS', 'FAIL') AS min_products_check FROM products;
+SELECT IF(SUM(category_id = 5) >= 50 AND SUM(category_id = 3) >= 50, 'PASS', 'FAIL') AS fruit_seafood_check FROM products;
 SELECT IF(COUNT(*) >= 10, 'PASS', 'FAIL') AS min_inventory_check FROM inventory_items;
+SELECT IF(COUNT(*) >= 300, 'PASS', 'FAIL') AS min_shelf_life_rules_check FROM shelf_life_rules;
+SELECT IF(SUM(product_id IS NOT NULL) >= 300, 'PASS', 'FAIL') AS product_level_rules_check FROM shelf_life_rules;
+SELECT IF(SUM(product_id IS NULL) >= 18, 'PASS', 'FAIL') AS category_level_rules_check FROM shelf_life_rules;
 SELECT IF(COUNT(*) >= 5, 'PASS', 'FAIL') AS min_reminders_check FROM reminders;
 -- Expected: every table non-empty; all checks PASS
 
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 32: Clean schema recreation
+-- SCENARIO 35: Clean schema recreation
 -- Drop every table (reverse dependency order) so the schema can be
 -- recreated from scratch. DDL causes implicit commits in MySQL, so
 -- this block intentionally runs without a transaction.
