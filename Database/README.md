@@ -118,7 +118,7 @@ Additional rule: non-fresh items (`product_categories.is_fresh_food = FALSE`) mu
 | `reminders` | 7 | Lead times of 1, 2, 3 and 5 days; PENDING, TRIGGERED and CANCELLED. |
 | `notification_recipients` | 12 | Multiple recipients per reminder with independent read state. |
 
-Product-level shelf-life rules use `source_name = 'USDA FoodKeeper / industry standard'` with realistic `min_days`, `max_days` and `recommended_days` values for FRIDGE, FREEZER and PANTRY. Expiry dates in the inventory seed data are computed relative to `CURDATE()` so the sample data remains useful when the script is re-run at a later date.
+Product-level shelf-life rules use `source_name = 'USDA FoodKeeper'` with realistic `min_days`, `max_days` and `recommended_days` values for FRIDGE, FREEZER and PANTRY. Expiry dates in the inventory seed data are computed relative to `CURDATE()` so the sample data remains useful when the script is re-run at a later date.
 
 ## Initialization
 

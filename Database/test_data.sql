@@ -245,28 +245,65 @@ ROLLBACK;
 
 -- ============================================================
 -- SCENARIO 13: Product-level rule priority over category-level rule
--- When a product has its own rule in shelf_life_rules, the lookup
--- must choose the product-level rule before the category fallback.
+-- An inventory item whose product has a product-level rule must use
+-- that rule (not the category fallback) when expiry_date_source is
+-- CALCULATED. A PACKAGING or USER_INPUT date always wins over rules.
 -- ============================================================
 START TRANSACTION;
 
--- Product 24 (Mango) is a Fruit product with a product-level PANTRY
--- rule; Fruits also has a category-level fallback for PANTRY. The
--- lookup orders product-level rules first (priority 0).
+-- Product 9 (Cavendish Banana) has a product-level rule for FRIDGE.
+-- Lock the rule row to simulate a concurrent-safe lookup.
 SELECT rule_id, product_id, category_id, storage_type_id,
-       min_days, max_days, recommended_days,
+       min_days, max_days, recommended_days
+FROM shelf_life_rules
+WHERE product_id = 9 AND storage_type_id = 1
+FOR UPDATE;
+
+-- The lookup must order the product-level rule first (priority 0),
+-- before the Fruits category-level fallback (priority 1).
+SELECT rule_id, product_id, recommended_days,
        CASE WHEN product_id IS NOT NULL THEN 0 ELSE 1 END AS priority
 FROM shelf_life_rules
-WHERE (product_id = 24 OR (product_id IS NULL AND category_id = 5))
-  AND storage_type_id = 3
+WHERE (product_id = 9 OR (product_id IS NULL AND category_id = 5))
+  AND storage_type_id = 1
 ORDER BY priority, rule_id;
--- Expected: product-level rule (product_id = 24) first,
---           category-level fallback (product_id IS NULL) second
+-- Expected: product-level rule (product_id = 9, recommended_days = 9.0)
+--           first, category fallback (product_id IS NULL) second
 
-SELECT COUNT(*) AS product_rules
+-- Calculate the expiry from the product-level rule
+-- (recommended_days = 9.0 -> 9 days from production).
+INSERT INTO inventory_items
+  (team_id, product_id, storage_type_id, created_by, quantity,
+   production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
+SELECT 1, 9, 1, 1, 1.00,
+       CURDATE(), CURDATE(),
+       CAST(recommended_days AS UNSIGNED),
+       DATE_ADD(CURDATE(), INTERVAL CAST(recommended_days AS UNSIGNED) DAY),
+       'CALCULATED'
 FROM shelf_life_rules
-WHERE product_id = 24 AND storage_type_id = 3;
--- Expected: 1 (exactly one product-level rule for Mango in PANTRY)
+WHERE product_id = 9 AND storage_type_id = 1;
+
+SET @priority_item = LAST_INSERT_ID();
+
+SELECT inventory_item_id, product_id, shelf_life_days, expiry_date, expiry_date_source
+FROM inventory_items
+WHERE inventory_item_id = @priority_item;
+-- Expected: shelf_life_days = 9, expiry_date = CURDATE() + 9 days,
+--           source CALCULATED (values from the product-level rule)
+
+-- A PACKAGING item must ignore all rules and use the printed date.
+INSERT INTO inventory_items
+  (team_id, product_id, storage_type_id, created_by, quantity,
+   purchase_date, expiry_date, expiry_date_source)
+VALUES (1, 9, 1, 1, 1.00, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 20 DAY), 'PACKAGING');
+
+SET @packaging_item = LAST_INSERT_ID();
+
+SELECT inventory_item_id, expiry_date, expiry_date_source, shelf_life_days
+FROM inventory_items
+WHERE inventory_item_id = @packaging_item;
+-- Expected: expiry_date = CURDATE() + 20 days (printed date wins,
+--           rules ignored, shelf_life_days NULL)
 
 ROLLBACK;
 
@@ -277,21 +314,55 @@ ROLLBACK;
 -- ============================================================
 START TRANSACTION;
 
--- Temporarily remove Mango's product-level PANTRY rule to simulate
--- the "no product-level rule" case. The DELETE is rolled back below.
-DELETE FROM shelf_life_rules
-WHERE product_id = 24 AND storage_type_id = 3;
+-- Create a brand-new product in the Fruits category; it has no
+-- product-level rule in shelf_life_rules.
+INSERT INTO products (category_id, product_name, barcode)
+VALUES (5, 'Test Dragon Fruit', NULL);
 
+SET @fallback_product = LAST_INSERT_ID();
+
+SELECT COUNT(*) AS product_rules
+FROM shelf_life_rules
+WHERE product_id = @fallback_product;
+-- Expected: 0 (no product-level rule for the new product)
+
+-- Lock the category-level fallback row (Fruits + FRIDGE).
 SELECT rule_id, product_id, category_id, storage_type_id,
-       min_days, max_days, recommended_days,
+       min_days, max_days, recommended_days
+FROM shelf_life_rules
+WHERE product_id IS NULL AND category_id = 5 AND storage_type_id = 1
+FOR UPDATE;
+
+-- The lookup returns only the category fallback for this product.
+SELECT rule_id, product_id, recommended_days,
        CASE WHEN product_id IS NOT NULL THEN 0 ELSE 1 END AS priority
 FROM shelf_life_rules
-WHERE (product_id = 24 OR (product_id IS NULL AND category_id = 5))
-  AND storage_type_id = 3
-ORDER BY priority, rule_id
-LIMIT 1;
--- Expected: exactly 1 row, the category-level fallback
---           (product_id IS NULL, category_id = 5, storage_type_id = 3)
+WHERE (product_id = @fallback_product OR (product_id IS NULL AND category_id = 5))
+  AND storage_type_id = 1
+ORDER BY priority, rule_id;
+-- Expected: exactly 1 row, the category fallback (product_id IS NULL,
+--           recommended_days = 6.0)
+
+-- Calculate the expiry from the category fallback rule
+-- (recommended_days = 6.0 -> 6 days from production).
+INSERT INTO inventory_items
+  (team_id, product_id, storage_type_id, created_by, quantity,
+   production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
+SELECT 1, @fallback_product, 1, 1, 1.00,
+       CURDATE(), CURDATE(),
+       CAST(recommended_days AS UNSIGNED),
+       DATE_ADD(CURDATE(), INTERVAL CAST(recommended_days AS UNSIGNED) DAY),
+       'CALCULATED'
+FROM shelf_life_rules
+WHERE product_id IS NULL AND category_id = 5 AND storage_type_id = 1;
+
+SET @fallback_item = LAST_INSERT_ID();
+
+SELECT inventory_item_id, product_id, shelf_life_days, expiry_date, expiry_date_source
+FROM inventory_items
+WHERE inventory_item_id = @fallback_item;
+-- Expected: shelf_life_days = 6, expiry_date = CURDATE() + 6 days,
+--           source CALCULATED (values from the category fallback rule)
 
 ROLLBACK;
 
