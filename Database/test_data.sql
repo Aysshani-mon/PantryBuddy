@@ -20,7 +20,7 @@
 --     DDL statements cause implicit commits in MySQL.
 -- ============================================================
 
-USE pantry_buddy;
+USE Real_ProjectV1.0_TM06;
 SET NAMES utf8mb4;
 
 -- ============================================================

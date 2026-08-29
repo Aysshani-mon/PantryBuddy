@@ -6,7 +6,7 @@
 -- Content      : representative English seed data for every table.
 -- ============================================================
 
-USE pantry_buddy;
+USE `Real_ProjectV1.0_TM06`;
 SET NAMES utf8mb4;
 
 -- ------------------------------------------------------------

@@ -12,11 +12,11 @@
 -- dependency order) and recreates them from scratch.
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS pantry_buddy
+CREATE DATABASE IF NOT EXISTS `Real_ProjectV1.0_TM06`
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE pantry_buddy;
+USE `Real_ProjectV1.0_TM06`;
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
