@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db');
 const { ApiError, asyncHandler } = require('../util/errors');
 const { CATEGORY_DB_NAMES, CATEGORY_DART_NAMES, STORAGE_DB_NAMES, STORAGE_DART_NAMES } = require('../util/enums');
+const { assertMember, assertMemberForItem } = require('../util/household_access');
 
 const router = express.Router();
 
@@ -70,17 +71,21 @@ async function findStorageTypeId(conn, storageDartName) {
 
 // GET /households/:householdId/inventory-items
 router.get('/households/:householdId/inventory-items', asyncHandler(async (req, res) => {
+  await assertMember(req.userId, req.params.householdId);
   const [rows] = await pool.query(`${ITEM_SELECT} WHERE ii.team_id = ? ORDER BY ii.expiry_date ASC`, [req.params.householdId]);
   res.json(rows.map(itemRowToJson));
 }));
 
 // POST /households/:householdId/inventory-items
-// { name, quantity, storageLocation, category, useByDate, addedByUserId }
+// { name, quantity, storageLocation, category, useByDate }
+// addedByUserId is always req.userId, never trusted from the body.
 router.post('/households/:householdId/inventory-items', asyncHandler(async (req, res) => {
-  const { name, quantity, storageLocation, category, useByDate, addedByUserId } = req.body;
-  if (!name || !quantity || !storageLocation || !category || !useByDate || !addedByUserId) {
-    throw new ApiError(400, 'name, quantity, storageLocation, category, useByDate, addedByUserId are required.');
+  await assertMember(req.userId, req.params.householdId);
+  const { name, quantity, storageLocation, category, useByDate } = req.body;
+  if (!name || !quantity || !storageLocation || !category || !useByDate) {
+    throw new ApiError(400, 'name, quantity, storageLocation, category, useByDate are required.');
   }
+  const addedByUserId = req.userId;
 
   const conn = await pool.getConnection();
   try {
@@ -113,6 +118,7 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
 
 // PUT /inventory-items/:id  — edit (name/quantity/storage/category/date)
 router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
+  await assertMemberForItem(req.userId, req.params.id);
   const { name, quantity, storageLocation, category, useByDate } = req.body;
   const conn = await pool.getConnection();
   try {
@@ -155,12 +161,15 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /inventory-items/:id/resolve { disposition: 'consumed'|'discarded', resolvedByUserId }
+// POST /inventory-items/:id/resolve { disposition: 'consumed'|'discarded' }
+// resolvedByUserId is always req.userId, never trusted from the body.
 router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
-  const { disposition, resolvedByUserId } = req.body;
-  if (!['consumed', 'discarded'].includes(disposition) || !resolvedByUserId) {
-    throw new ApiError(400, "disposition must be 'consumed' or 'discarded', and resolvedByUserId is required.");
+  await assertMemberForItem(req.userId, req.params.id);
+  const { disposition } = req.body;
+  if (!['consumed', 'discarded'].includes(disposition)) {
+    throw new ApiError(400, "disposition must be 'consumed' or 'discarded'.");
   }
+  const resolvedByUserId = req.userId;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -203,6 +212,7 @@ router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
 
 // DELETE /inventory-items/:id
 router.delete('/inventory-items/:id', asyncHandler(async (req, res) => {
+  await assertMemberForItem(req.userId, req.params.id);
   await pool.query('DELETE FROM inventory_items WHERE inventory_item_id = ?', [req.params.id]);
   res.status(204).send();
 }));

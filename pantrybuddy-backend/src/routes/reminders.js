@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { ApiError, asyncHandler } = require('../util/errors');
+const { assertMember } = require('../util/household_access');
 
 const router = express.Router();
 
@@ -20,12 +21,15 @@ function reminderRowToJson(row) {
   };
 }
 
-// POST /reminders { itemId, householdId, leadTimeDays, createdByUserId }
+// POST /reminders { itemId, householdId, leadTimeDays }
+// createdByUserId is always req.userId, never trusted from the body.
 router.post('/reminders', asyncHandler(async (req, res) => {
-  const { itemId, householdId, leadTimeDays, createdByUserId } = req.body;
-  if (!itemId || !householdId || !leadTimeDays || !createdByUserId) {
-    throw new ApiError(400, 'itemId, householdId, leadTimeDays, createdByUserId are required.');
+  const { itemId, householdId, leadTimeDays } = req.body;
+  if (!itemId || !householdId || !leadTimeDays) {
+    throw new ApiError(400, 'itemId, householdId, leadTimeDays are required.');
   }
+  await assertMember(req.userId, householdId);
+  const createdByUserId = req.userId;
 
   const [itemRows] = await pool.query('SELECT expiry_date FROM inventory_items WHERE inventory_item_id = ?', [itemId]);
   if (itemRows.length === 0) throw new ApiError(404, 'Item not found.');
@@ -42,6 +46,7 @@ router.post('/reminders', asyncHandler(async (req, res) => {
 
 // GET /households/:householdId/reminders
 router.get('/households/:householdId/reminders', asyncHandler(async (req, res) => {
+  await assertMember(req.userId, req.params.householdId);
   const [rows] = await pool.query(
     "SELECT * FROM reminders WHERE team_id = ? AND status <> 'CANCELLED'",
     [req.params.householdId]
@@ -51,6 +56,9 @@ router.get('/households/:householdId/reminders', asyncHandler(async (req, res) =
 
 // POST /reminders/:id/mark-triggered
 router.post('/reminders/:id/mark-triggered', asyncHandler(async (req, res) => {
+  const [rows] = await pool.query('SELECT team_id FROM reminders WHERE reminder_id = ?', [req.params.id]);
+  if (rows.length === 0) throw new ApiError(404, 'Reminder not found.');
+  await assertMember(req.userId, rows[0].team_id);
   await pool.query("UPDATE reminders SET status = 'TRIGGERED' WHERE reminder_id = ? AND status = 'PENDING'", [req.params.id]);
   res.json({ ok: true });
 }));

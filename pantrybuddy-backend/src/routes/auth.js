@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const { avatarKeyToId, avatarIdToKey } = require('../util/avatars');
 const { ApiError, asyncHandler } = require('../util/errors');
+const { signToken } = require('../util/auth');
 
 const router = express.Router();
 
@@ -37,7 +38,7 @@ router.post('/signup', asyncHandler(async (req, res) => {
   );
 
   const [rows] = await pool.query('SELECT * FROM users WHERE user_id = ?', [result.insertId]);
-  res.status(201).json(userRowToJson(rows[0]));
+  res.status(201).json({ ...userRowToJson(rows[0]), token: signToken(result.insertId) });
 }));
 
 // POST /auth/signin { email, password }
@@ -56,7 +57,7 @@ router.post('/signin', asyncHandler(async (req, res) => {
   if (!match) {
     throw new ApiError(401, 'Incorrect email or password.');
   }
-  res.json(userRowToJson(rows[0]));
+  res.json({ ...userRowToJson(rows[0]), token: signToken(rows[0].user_id) });
 }));
 
 // POST /auth/forgot-password { email }

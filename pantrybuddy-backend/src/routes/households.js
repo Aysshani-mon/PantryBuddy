@@ -2,6 +2,7 @@ const express = require('express');
 const pool = require('../db');
 const { avatarIdToKey } = require('../util/avatars');
 const { ApiError, asyncHandler } = require('../util/errors');
+const { assertMember, assertAdmin } = require('../util/household_access');
 
 const router = express.Router();
 
@@ -41,10 +42,11 @@ function joinRequestRowToJson(row) {
   };
 }
 
-// POST /households { name, creatorUserId }  — AC 1.2.1
+// POST /households { name }  — AC 1.2.1. Creator is always req.userId
+// (the authenticated caller), never trusted from the request body.
 router.post('/households', asyncHandler(async (req, res) => {
-  const { name, creatorUserId } = req.body;
-  if (!name || !creatorUserId) throw new ApiError(400, 'name and creatorUserId are required.');
+  const { name } = req.body;
+  if (!name) throw new ApiError(400, 'name is required.');
 
   const conn = await pool.getConnection();
   try {
@@ -52,7 +54,7 @@ router.post('/households', asyncHandler(async (req, res) => {
     const [result] = await conn.query('INSERT INTO teams (team_name) VALUES (?)', [name]);
     await conn.query(
       'INSERT INTO team_members (team_id, user_id, role, status) VALUES (?, ?, \'ADMIN\', \'ACTIVE\')',
-      [result.insertId, creatorUserId]
+      [result.insertId, req.userId]
     );
     await conn.commit();
     const [rows] = await conn.query('SELECT * FROM teams WHERE team_id = ?', [result.insertId]);
@@ -65,14 +67,17 @@ router.post('/households', asyncHandler(async (req, res) => {
   }
 }));
 
-// GET /households/:id
+// GET /households/:id — must be a member to view it.
 router.get('/households/:id', asyncHandler(async (req, res) => {
+  await assertMember(req.userId, req.params.id);
   const [rows] = await pool.query('SELECT * FROM teams WHERE team_id = ?', [req.params.id]);
   if (rows.length === 0) throw new ApiError(404, 'Household not found.');
   res.json(householdRowToJson(rows[0]));
 }));
 
-// GET /households/by-invite/:code  — invite code is just the numeric team_id
+// GET /households/by-invite/:code — deliberately NOT membership-gated:
+// this is how a non-member looks up a household before requesting to
+// join it. Just needs to be signed in (requireAuth, applied globally).
 router.get('/households/by-invite/:code', asyncHandler(async (req, res) => {
   const teamId = Number(req.params.code);
   if (!Number.isInteger(teamId)) {
@@ -85,6 +90,7 @@ router.get('/households/by-invite/:code', asyncHandler(async (req, res) => {
 
 // GET /households/:id/members  — AC 1.2.2 / team_members join users
 router.get('/households/:id/members', asyncHandler(async (req, res) => {
+  await assertMember(req.userId, req.params.id);
   const [rows] = await pool.query(
     `SELECT tm.role, tm.status, u.user_id, u.display_name, u.email, u.avatar_id
      FROM team_members tm JOIN users u ON u.user_id = tm.user_id
@@ -94,13 +100,16 @@ router.get('/households/:id/members', asyncHandler(async (req, res) => {
   res.json(rows.map(memberRowToJson));
 }));
 
-// POST /households/join-requests { inviteCode, userId }  — AC 3.5.1 (revised)
+// POST /join-requests { inviteCode }  — AC 3.5.1 (revised). The
+// requester is always req.userId, never trusted from the request body
+// (otherwise anyone could submit a join request AS someone else).
 router.post('/join-requests', asyncHandler(async (req, res) => {
-  const { inviteCode, userId } = req.body;
+  const { inviteCode } = req.body;
   const teamId = Number(inviteCode);
-  if (!Number.isInteger(teamId) || !userId) {
-    throw new ApiError(400, 'inviteCode and userId are required.');
+  if (!Number.isInteger(teamId)) {
+    throw new ApiError(400, 'inviteCode is required.');
   }
+  const userId = req.userId;
 
   const [teamRows] = await pool.query('SELECT * FROM teams WHERE team_id = ?', [teamId]);
   if (teamRows.length === 0) throw new ApiError(404, 'No household found for that invite code.');
@@ -136,8 +145,10 @@ router.post('/join-requests', asyncHandler(async (req, res) => {
   res.status(201).json(joinRequestRowToJson(rows[0]));
 }));
 
-// GET /households/:id/join-requests?status=pending
+// GET /households/:id/join-requests?status=pending — admin-only: this is
+// the review queue, not something a regular member should see.
 router.get('/households/:id/join-requests', asyncHandler(async (req, res) => {
+  await assertAdmin(req.userId, req.params.id);
   const status = (req.query.status || 'pending').toUpperCase();
   const [rows] = await pool.query(
     `SELECT jr.*, t.team_name, u.display_name, u.avatar_id
@@ -150,7 +161,9 @@ router.get('/households/:id/join-requests', asyncHandler(async (req, res) => {
   res.json(rows.map(joinRequestRowToJson));
 }));
 
-// GET /join-requests/:id  — for the requester's "waiting" screen to poll
+// GET /join-requests/:id — for the requester's own "waiting" screen to
+// poll. Restricted to the person who submitted it — nobody else should
+// be able to watch someone else's pending request resolve.
 router.get('/join-requests/:id', asyncHandler(async (req, res) => {
   const [rows] = await pool.query(
     `SELECT jr.*, t.team_name, u.display_name, u.avatar_id
@@ -161,12 +174,15 @@ router.get('/join-requests/:id', asyncHandler(async (req, res) => {
     [req.params.id]
   );
   if (rows.length === 0) throw new ApiError(404, 'Join request not found.');
+  if (String(rows[0].user_id) !== req.userId) {
+    throw new ApiError(403, "You can only view your own join requests.");
+  }
   res.json(joinRequestRowToJson(rows[0]));
 }));
 
-// POST /join-requests/:id/approve { reviewedByUserId }
+// POST /join-requests/:id/approve — admin-only. reviewedByUserId is
+// always req.userId, never trusted from the body.
 router.post('/join-requests/:id/approve', asyncHandler(async (req, res) => {
-  const { reviewedByUserId } = req.body;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -174,10 +190,11 @@ router.post('/join-requests/:id/approve', asyncHandler(async (req, res) => {
     if (rows.length === 0) throw new ApiError(404, 'Join request not found.');
     const request = rows[0];
     if (request.status !== 'PENDING') throw new ApiError(409, 'This request has already been reviewed.');
+    await assertAdmin(req.userId, request.team_id);
 
     await conn.query(
       "UPDATE join_requests SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by = ? WHERE request_id = ?",
-      [reviewedByUserId, req.params.id]
+      [req.userId, req.params.id]
     );
     await conn.query(
       "INSERT INTO team_members (team_id, user_id, role, status) VALUES (?, ?, 'MEMBER', 'ACTIVE')",
@@ -193,22 +210,25 @@ router.post('/join-requests/:id/approve', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /join-requests/:id/decline { reviewedByUserId }
+// POST /join-requests/:id/decline — admin-only.
 router.post('/join-requests/:id/decline', asyncHandler(async (req, res) => {
-  const { reviewedByUserId } = req.body;
+  const [rows] = await pool.query('SELECT team_id, status FROM join_requests WHERE request_id = ?', [req.params.id]);
+  if (rows.length === 0) throw new ApiError(404, 'Join request not found.');
+  if (rows[0].status !== 'PENDING') throw new ApiError(409, 'This request has already been reviewed.');
+  await assertAdmin(req.userId, rows[0].team_id);
+
   const [result] = await pool.query(
     "UPDATE join_requests SET status = 'DECLINED', reviewed_at = NOW(), reviewed_by = ? WHERE request_id = ? AND status = 'PENDING'",
-    [reviewedByUserId, req.params.id]
+    [req.userId, req.params.id]
   );
   if (result.affectedRows === 0) throw new ApiError(409, 'This request has already been reviewed.');
   res.json({ ok: true });
 }));
 
-// GET /users/:userId/households — households this user is an ACTIVE
-// member of, most-recently-joined first. Used right after sign-in so a
-// returning user lands back in their existing household instead of the
-// "create or join" screen.
+// GET /users/:userId/households — restricted to querying your own
+// membership only (can't look up someone else's households).
 router.get('/users/:userId/households', asyncHandler(async (req, res) => {
+  if (req.userId !== req.params.userId) throw new ApiError(403, "You can only view your own households.");
   const [rows] = await pool.query(
     `SELECT t.* FROM team_members tm
      JOIN teams t ON t.team_id = tm.team_id
@@ -219,12 +239,9 @@ router.get('/users/:userId/households', asyncHandler(async (req, res) => {
   res.json(rows.map(householdRowToJson));
 }));
 
-// GET /users/:userId/join-requests?status=pending — requests THIS user
-// submitted (different from GET /households/:id/join-requests, which
-// lists requests an admin needs to review). Used on sign-in so a
-// returning user with a still-pending request sees the waiting screen
-// again instead of being asked to request access a second time.
+// GET /users/:userId/join-requests?status=pending — same restriction.
 router.get('/users/:userId/join-requests', asyncHandler(async (req, res) => {
+  if (req.userId !== req.params.userId) throw new ApiError(403, "You can only view your own join requests.");
   const status = (req.query.status || 'pending').toUpperCase();
   const [rows] = await pool.query(
     `SELECT jr.*, t.team_name, u.display_name, u.avatar_id

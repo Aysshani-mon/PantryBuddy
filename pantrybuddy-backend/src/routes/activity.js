@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { asyncHandler } = require('../util/errors');
+const { assertMember } = require('../util/household_access');
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ const router = express.Router();
 
 // GET /households/:householdId/activity
 router.get('/households/:householdId/activity', asyncHandler(async (req, res) => {
+  await assertMember(req.userId, req.params.householdId);
   const [txnRows] = await pool.query(
     `SELECT it.transaction_id, it.transaction_type, it.transaction_time,
             u.user_id, u.display_name, p.product_name

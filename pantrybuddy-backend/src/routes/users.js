@@ -15,6 +15,9 @@ router.get('/:id', asyncHandler(async (req, res) => {
 
 // PATCH /users/:id { name?, avatarKey? }  — AC 1.4.1
 router.patch('/:id', asyncHandler(async (req, res) => {
+  if (req.userId !== req.params.id) {
+    throw new ApiError(403, 'You can only edit your own profile.');
+  }
   const { name, avatarKey } = req.body;
   const updates = [];
   const params = [];

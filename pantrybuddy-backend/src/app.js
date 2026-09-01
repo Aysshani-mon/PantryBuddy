@@ -10,6 +10,7 @@ const remindersRouter = require('./routes/reminders');
 const activityRouter = require('./routes/activity');
 const shelfLifeRouter = require('./routes/shelf_life');
 const { ApiError } = require('./util/errors');
+const { requireAuth } = require('./util/auth');
 
 const app = express();
 app.use(cors());
@@ -17,7 +18,15 @@ app.use(express.json());
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Public — no token needed to sign up, sign in, or request a password reset.
 app.use('/auth', authRouter);
+
+// Everything below this line requires a valid Bearer token (see
+// util/auth.js) — req.userId is then available to every route handler,
+// and individual routes further check household membership/admin role
+// where relevant (see util/household_access.js).
+app.use(requireAuth);
+
 app.use('/users', usersRouter);
 // These routers define their own full paths internally (mixing
 // /households/:id/... with /join-requests/... etc.), so they're all
