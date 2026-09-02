@@ -3,6 +3,8 @@ const { ApiError } = require('./errors');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const TOKEN_EXPIRY = '24h';
+const RESET_TOKEN_EXPIRY = '30m';
+const RESET_TOKEN_PURPOSE = 'password_reset';
 
 if (!JWT_SECRET) {
   // Fail loudly rather than silently signing tokens with a guessable
@@ -35,4 +37,36 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { signToken, requireAuth };
+/** Password-reset tokens are short-lived signed JWTs, NOT stored in the
+ * database (the schema has no column for them, and this also sidesteps
+ * needing shared persistent storage across serverless invocations —
+ * everything needed to verify the token travels inside the token itself).
+ * `pwv` is a short slice of the user's CURRENT password hash at
+ * send-time — if the password changes (via this reset or any other way)
+ * before the token is used, the slice won't match anymore and the token
+ * is rejected, giving one-time-use behaviour without a database. */
+function signResetToken(userId, currentPasswordHash) {
+  return jwt.sign(
+    { sub: String(userId), purpose: RESET_TOKEN_PURPOSE, pwv: currentPasswordHash.slice(-12) },
+    JWT_SECRET,
+    { expiresIn: RESET_TOKEN_EXPIRY }
+  );
+}
+
+/** Throws ApiError(400) on any invalid/expired/wrong-purpose token.
+ * Returns { userId, pwv }. Caller still needs to check pwv against the
+ * CURRENT password hash themselves (see routes/auth.js). */
+function verifyResetToken(token) {
+  let payload;
+  try {
+    payload = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    throw new ApiError(400, 'This reset link is invalid or has expired. Please request a new one.');
+  }
+  if (payload.purpose !== RESET_TOKEN_PURPOSE) {
+    throw new ApiError(400, 'This reset link is invalid.');
+  }
+  return { userId: payload.sub, pwv: payload.pwv };
+}
+
+module.exports = { signToken, requireAuth, signResetToken, verifyResetToken };

@@ -3,7 +3,8 @@ const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const { avatarKeyToId, avatarIdToKey } = require('../util/avatars');
 const { ApiError, asyncHandler } = require('../util/errors');
-const { signToken } = require('../util/auth');
+const { signToken, signResetToken, verifyResetToken } = require('../util/auth');
+const { sendPasswordResetEmail } = require('../util/email');
 
 const router = express.Router();
 
@@ -61,15 +62,43 @@ router.post('/signin', asyncHandler(async (req, res) => {
 }));
 
 // POST /auth/forgot-password { email }
-// NOTE: does not actually send an email yet — no email service is wired
-// up. Deliberately always returns 200 regardless of whether the email
-// exists, to avoid leaking which addresses are registered.
+// Always returns 200 regardless of whether the email exists, to avoid
+// leaking which addresses are registered. Sends a real email via Gmail
+// SMTP containing a signed, 30-minute reset link — see util/email.js.
 router.post('/forgot-password', asyncHandler(async (req, res) => {
   const { email } = req.body;
   if (!email) throw new ApiError(400, 'email is required.');
-  // TODO: integrate a real email service (SendGrid, SES, etc.) here and
-  // generate/store a reset token. See README "Not yet implemented".
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  const [rows] = await pool.query('SELECT user_id, password_hash FROM users WHERE email = ?', [normalizedEmail]);
+  if (rows.length > 0) {
+    const resetToken = signResetToken(rows[0].user_id, rows[0].password_hash);
+    await sendPasswordResetEmail(normalizedEmail, resetToken);
+  }
   res.status(200).json({ ok: true });
+}));
+
+// POST /auth/reset-password { token, newPassword }
+router.post('/reset-password', asyncHandler(async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (!token || !newPassword) throw new ApiError(400, 'token and newPassword are required.');
+  if (newPassword.length < 8) throw new ApiError(400, 'Password must be at least 8 characters.');
+
+  const { userId, pwv } = verifyResetToken(token);
+  const [rows] = await pool.query('SELECT password_hash FROM users WHERE user_id = ?', [userId]);
+  if (rows.length === 0) throw new ApiError(400, 'This reset link is invalid.');
+
+  // The slice of the password hash at send-time must still match now —
+  // if it doesn't, the password already changed since this link was
+  // emailed (e.g. the link was already used once), so reject it. This
+  // gives one-time-use behaviour without storing tokens anywhere.
+  if (rows[0].password_hash.slice(-12) !== pwv) {
+    throw new ApiError(400, 'This reset link has already been used. Please request a new one.');
+  }
+
+  const newHash = await bcrypt.hash(newPassword, 10);
+  await pool.query('UPDATE users SET password_hash = ? WHERE user_id = ?', [newHash, userId]);
+  res.json({ ok: true });
 }));
 
 module.exports = { router, userRowToJson };

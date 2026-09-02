@@ -39,6 +39,26 @@ your phone or another device to reach it, you'll want to either:
 - Deploy it somewhere free/cheap like Render, Railway, or Fly.io (set the
   same environment variables there instead of a local `.env`).
 
+## Email (Gmail SMTP)
+
+Password-reset emails are sent through your own Gmail account (via [Nodemailer](https://nodemailer.com)) — completely free, no domain needed, and unlike a third-party email API's free tier, it works for **any** recipient, not just your own address.
+
+1. On the Google Account you want to send from: turn on **2-Step Verification** (Google Account → Security) — required before you can generate an App Password.
+2. Google Account → Security → **App Passwords** → create one (name it anything, e.g. "PantryBuddy") → copy the 16-character password it gives you.
+3. Add to your local `.env`:
+   ```
+   GMAIL_USER=youraddress@gmail.com
+   GMAIL_APP_PASSWORD=the16charapppassword
+   FRONTEND_URL=https://pantrybuddy-yourname.vercel.app
+   ```
+4. Add the same three to Vercel's environment variables (Project Settings → Environment Variables) and redeploy — env var changes don't apply to already-running deployments.
+
+**Note:** `GMAIL_APP_PASSWORD` is NOT your normal Gmail login password — using your real password won't work (and you shouldn't put it in an env var anyway). It's a separate, revocable 16-character password Google generates specifically for apps like this.
+
+If `GMAIL_USER`/`GMAIL_APP_PASSWORD` aren't set at all, the backend doesn't crash — it just logs the reset link to the server console instead of emailing it (useful for local testing without setting any of this up).
+
+Gmail's free sending limit is 500 emails/day — far more than a class project needs.
+
 ## API surface
 
 All request/response bodies are JSON. IDs are always returned as strings
@@ -48,7 +68,8 @@ All request/response bodies are JSON. IDs are always returned as strings
 | --- | --- | --- |
 | POST | `/auth/signup` | `{name, email, password, avatarKey}` → 409 if email taken |
 | POST | `/auth/signin` | `{email, password}` → 401 if wrong |
-| POST | `/auth/forgot-password` | `{email}` → always 200, doesn't actually send an email yet (see below) |
+| POST | `/auth/forgot-password` | `{email}` → always 200; sends a real reset email via Gmail SMTP (see "Email (Gmail SMTP)" above) |
+| POST | `/auth/reset-password` | `{token, newPassword}` → completes a reset started above |
 | GET/PATCH | `/users/:id` | |
 | POST | `/households` | `{name, creatorUserId}` — creator becomes ADMIN |
 | GET | `/households/:id` | |
@@ -88,10 +109,10 @@ All request/response bodies are JSON. IDs are always returned as strings
    from `inventory_transactions` (ADD/CONSUME/DISCARD) plus
    `team_members.joined_at`. This means item **edits** don't show up in
    the feed (no transaction type for that) — only add/consume/discard/join.
-5. **Password reset doesn't send an email.** `/auth/forgot-password`
-   always returns success but doesn't actually email anyone yet — needs
-   a real email service (SendGrid, AWS SES, etc.) wired in, plus a
-   reset-token column somewhere (not in the current schema).
+5. **Password reset works, but relies on one Gmail account.** All reset
+   emails send through whoever's `GMAIL_USER` is configured — fine for a
+   class project, but a real product would use a dedicated transactional
+   email service instead of a personal inbox.
 6. **`notification_recipients` isn't used yet.** Multi-user per-reminder
    read state isn't implemented in either the app or this API yet.
 7. **`reminders.status = 'CANCELLED'`** has no API route yet (no
