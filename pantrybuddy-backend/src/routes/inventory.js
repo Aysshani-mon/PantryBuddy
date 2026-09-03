@@ -6,21 +6,14 @@ const { assertMember, assertMemberForItem } = require('../util/household_access'
 
 const router = express.Router();
 
-// NOTE: schema.sql's inventory_items has no `unit` column (e.g. 'pcs',
-// 'g', 'cans') — quantity is a bare DECIMAL. The app's FoodItem.unit is
-// therefore NOT persisted yet; this API always returns 'pcs'. Ask the DB
-// teammate to add `unit VARCHAR(20) NULL` to inventory_items if you want
-// this preserved for real — it's then a 2-line change in this file
-// (add it to the INSERT/UPDATE and to itemRowToJson below).
-const UNIT_PLACEHOLDER = 'pcs';
-
 function itemRowToJson(row) {
   return {
     id: String(row.inventory_item_id),
     householdId: String(row.team_id),
     name: row.product_name,
     quantity: Number(row.quantity),
-    unit: UNIT_PLACEHOLDER,
+    unit: row.unit || 'pcs',
+    notes: row.notes,
     storageLocation: STORAGE_DART_NAMES[row.storage_name] ?? 'pantry',
     category: CATEGORY_DART_NAMES[row.category_name] ?? 'shelfStableFoods',
     useByDate: row.expiry_date,
@@ -77,11 +70,13 @@ router.get('/households/:householdId/inventory-items', asyncHandler(async (req, 
 }));
 
 // POST /households/:householdId/inventory-items
-// { name, quantity, storageLocation, category, useByDate }
+// { name, quantity, unit, notes, storageLocation, category, useByDate }
 // addedByUserId is always req.userId, never trusted from the body.
 router.post('/households/:householdId/inventory-items', asyncHandler(async (req, res) => {
   await assertMember(req.userId, req.params.householdId);
   const { name, quantity, storageLocation, category, useByDate } = req.body;
+  const unit = req.body.unit || 'pcs';
+  const notes = req.body.notes || null;
   if (!name || !quantity || !storageLocation || !category || !useByDate) {
     throw new ApiError(400, 'name, quantity, storageLocation, category, useByDate are required.');
   }
@@ -95,9 +90,9 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
 
     const [result] = await conn.query(
       `INSERT INTO inventory_items
-        (team_id, product_id, storage_type_id, created_by, quantity, purchase_date, expiry_date, expiry_date_source, status)
-       VALUES (?, ?, ?, ?, ?, CURDATE(), ?, 'USER_INPUT', 'IN_STOCK')`,
-      [req.params.householdId, productId, storageTypeId, addedByUserId, quantity, useByDate]
+        (team_id, product_id, storage_type_id, created_by, quantity, unit, notes, purchase_date, expiry_date, expiry_date_source, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, 'USER_INPUT', 'IN_STOCK')`,
+      [req.params.householdId, productId, storageTypeId, addedByUserId, quantity, unit, notes, useByDate]
     );
     await conn.query(
       `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
@@ -119,7 +114,7 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
 // PUT /inventory-items/:id  — edit (name/quantity/storage/category/date)
 router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   await assertMemberForItem(req.userId, req.params.id);
-  const { name, quantity, storageLocation, category, useByDate } = req.body;
+  const { name, quantity, unit, notes, storageLocation, category, useByDate } = req.body;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -140,6 +135,14 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
     if (quantity !== undefined) {
       updates.push('quantity = ?');
       params.push(quantity);
+    }
+    if (unit !== undefined) {
+      updates.push('unit = ?');
+      params.push(unit);
+    }
+    if (notes !== undefined) {
+      updates.push('notes = ?');
+      params.push(notes || null);
     }
     if (useByDate !== undefined) {
       updates.push('expiry_date = ?');
