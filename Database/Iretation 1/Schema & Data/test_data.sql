@@ -202,10 +202,10 @@ ROLLBACK;
 START TRANSACTION;
 
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date, expiry_date_source)
 VALUES
-  (1, 13, 3, 1, 2.00, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 90 DAY), 'PACKAGING');
+  (1, 13, 3, 1, 2.00, 'pcs', NULL, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 90 DAY), 'PACKAGING');
 
 SET @test_item = LAST_INSERT_ID();
 
@@ -226,12 +226,12 @@ ROLLBACK;
 START TRANSACTION;
 
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
 VALUES
-  (1, 13, 3, 1, 2.00, NULL, CURDATE(), NULL, DATE_ADD(CURDATE(), INTERVAL 90 DAY), 'PACKAGING'),
-  (1, 11, 3, 1, 1.00, NULL, CURDATE(), NULL, DATE_ADD(CURDATE(), INTERVAL 30 DAY), 'USER_INPUT'),
-  (1, 7,  1, 1, 1.00, DATE_SUB(CURDATE(), INTERVAL 2 DAY), DATE_SUB(CURDATE(), INTERVAL 2 DAY),
+  (1, 13, 3, 1, 2.00, 'pcs', NULL, NULL, CURDATE(), NULL, DATE_ADD(CURDATE(), INTERVAL 90 DAY), 'PACKAGING'),
+  (1, 11, 3, 1, 1.00, 'pcs', NULL, NULL, CURDATE(), NULL, DATE_ADD(CURDATE(), INTERVAL 30 DAY), 'USER_INPUT'),
+  (1, 7,  1, 1, 1.00, 'pcs', NULL, DATE_SUB(CURDATE(), INTERVAL 2 DAY), DATE_SUB(CURDATE(), INTERVAL 2 DAY),
    5, DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 2 DAY), INTERVAL 5 DAY), 'CALCULATED');
 
 SELECT inventory_item_id, product_id, expiry_date_source, expiry_date
@@ -273,9 +273,9 @@ ORDER BY priority, rule_id;
 -- Calculate the expiry from the product-level rule
 -- (recommended_days = 9.0 -> 9 days from production).
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
-SELECT 1, 9, 1, 1, 1.00,
+SELECT 1, 9, 1, 1, 1.00, 'pcs', NULL,
        CURDATE(), CURDATE(),
        CAST(recommended_days AS UNSIGNED),
        DATE_ADD(CURDATE(), INTERVAL CAST(recommended_days AS UNSIGNED) DAY),
@@ -293,9 +293,9 @@ WHERE inventory_item_id = @priority_item;
 
 -- A PACKAGING item must ignore all rules and use the printed date.
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date, expiry_date_source)
-VALUES (1, 9, 1, 1, 1.00, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 20 DAY), 'PACKAGING');
+VALUES (1, 9, 1, 1, 1.00, 'pcs', NULL, CURDATE(), DATE_ADD(CURDATE(), INTERVAL 20 DAY), 'PACKAGING');
 
 SET @packaging_item = LAST_INSERT_ID();
 
@@ -346,9 +346,9 @@ ORDER BY priority, rule_id;
 -- Calculate the expiry from the category fallback rule
 -- (recommended_days = 6.0 -> 6 days from production).
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
-SELECT 1, @fallback_product, 1, 1, 1.00,
+SELECT 1, @fallback_product, 1, 1, 1.00, 'pcs', NULL,
        CURDATE(), CURDATE(),
        CAST(recommended_days AS UNSIGNED),
        DATE_ADD(CURDATE(), INTERVAL CAST(recommended_days AS UNSIGNED) DAY),
@@ -384,9 +384,9 @@ ORDER BY c.category_name, r.storage_type_id;
 -- Simulate a snack item with no expiry date (source CALCULATED but no
 -- production date or shelf-life days provided).
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date_source, expiry_date)
-VALUES (1, 11, 3, 1, 1.00, CURDATE(), 'CALCULATED', NULL);
+VALUES (1, 11, 3, 1, 1.00, 'pcs', NULL, CURDATE(), 'CALCULATED', NULL);
 
 -- The lookup for the Snacks category returns only the placeholder rule,
 -- so the application must NOT calculate an expiry date.
@@ -408,10 +408,10 @@ ROLLBACK;
 START TRANSACTION;
 
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    production_date, purchase_date, shelf_life_days, expiry_date, expiry_date_source)
 VALUES
-  (1, 5, 1, 1, 1.00,
+  (1, 5, 1, 1, 1.00, 'pcs', NULL,
    DATE_SUB(CURDATE(), INTERVAL 3 DAY), DATE_SUB(CURDATE(), INTERVAL 3 DAY),
    6, DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 3 DAY), INTERVAL 6 DAY), 'CALCULATED');
 
@@ -627,9 +627,9 @@ START TRANSACTION;
 -- [EXPECTED ERROR] Cannot add or update a child row: a foreign key
 -- constraint fails (invalid team_id, error 1452)
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date_source)
-VALUES (999999, 1, 1, 1, 1.00, CURDATE(), 'PACKAGING');
+VALUES (999999, 1, 1, 1, 1.00, 'pcs', NULL, CURDATE(), 'PACKAGING');
 
 ROLLBACK;
 
@@ -638,9 +638,9 @@ START TRANSACTION;
 -- [EXPECTED ERROR] Cannot add or update a child row: a foreign key
 -- constraint fails (invalid product_id, error 1452)
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date_source)
-VALUES (1, 999999, 1, 1, 1.00, CURDATE(), 'PACKAGING');
+VALUES (1, 999999, 1, 1, 1.00, 'pcs', NULL, CURDATE(), 'PACKAGING');
 
 ROLLBACK;
 
@@ -878,9 +878,9 @@ INSERT INTO team_members (team_id, user_id, role, status)
 VALUES (@temp_team, 1, 'ADMIN', 'ACTIVE');
 
 INSERT INTO inventory_items
-  (team_id, product_id, storage_type_id, created_by, quantity,
+  (team_id, product_id, storage_type_id, created_by, quantity, unit, notes,
    purchase_date, expiry_date_source, expiry_date)
-VALUES (@temp_team, 13, 3, 1, 1.00, CURDATE(), 'PACKAGING',
+VALUES (@temp_team, 13, 3, 1, 1.00, 'pcs', NULL, CURDATE(), 'PACKAGING',
         DATE_ADD(CURDATE(), INTERVAL 10 DAY));
 SET @temp_item = LAST_INSERT_ID();
 
