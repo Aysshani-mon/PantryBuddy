@@ -36,6 +36,23 @@ The schema contains exactly 12 tables and no additional summary, ML or predictio
 | 11 | `reminders` | Expiry reminders for inventory items. |
 | 12 | `notification_recipients` | Users notified for a reminder, with per-user read state. |
 
+### `inventory_items` Extra Fields
+
+The `inventory_items` table stores two fields for item quantities and notes:
+
+- **`unit`** (`VARCHAR(20)`, `NOT NULL`, default `'pcs'`) - Unit of measurement for the item (e.g. `pcs`, `kg`, `g`, `L`, `ml`, `dozen`). The column is placed immediately after `quantity`.
+- **`notes`** (`VARCHAR(500)`, nullable) - Optional user notes about the item (e.g. opened status, partial consumption notes). The column is placed immediately after `unit`.
+
+**Migration note for existing databases** (for the backend team; do not run these on a fresh database where the columns already exist):
+
+```sql
+ALTER TABLE inventory_items
+  ADD COLUMN unit VARCHAR(20) NOT NULL DEFAULT 'pcs' AFTER quantity;
+
+ALTER TABLE inventory_items
+  ADD COLUMN notes VARCHAR(500) NULL AFTER unit;
+```
+
 ## Relationships
 
 - `users` and `teams` are related many-to-many through `team_members`. A team admin is identified by `team_members.role = 'ADMIN'`; there is deliberately no `teams.created_by` column.

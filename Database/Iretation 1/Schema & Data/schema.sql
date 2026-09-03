@@ -167,6 +167,8 @@ CREATE TABLE inventory_items (
   storage_type_id   TINYINT UNSIGNED NOT NULL,
   created_by        BIGINT UNSIGNED NOT NULL,
   quantity          DECIMAL(10,2)    NOT NULL,
+  unit              VARCHAR(20)      NOT NULL DEFAULT 'pcs',
+  notes             VARCHAR(500)     NULL,
   production_date   DATE             NULL,
   purchase_date     DATE             NOT NULL,
   entry_date        DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -305,3 +307,19 @@ CREATE TABLE notification_recipients (
   CONSTRAINT fk_notification_recipients_user FOREIGN KEY (user_id)
     REFERENCES users (user_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================
+-- MIGRATION NOTE (existing databases only)
+-- The fresh schema above already includes the unit and notes
+-- columns. Backend teams upgrading a database created before this
+-- change should execute the following ALTER statements once:
+--
+--   ALTER TABLE inventory_items
+--     ADD COLUMN unit VARCHAR(20) NOT NULL DEFAULT 'pcs' AFTER quantity;
+--
+--   ALTER TABLE inventory_items
+--     ADD COLUMN notes VARCHAR(500) NULL AFTER unit;
+--
+-- These statements must NOT be re-run on a database that already
+-- contains the columns, because duplicate columns would be rejected.
+-- ============================================================
