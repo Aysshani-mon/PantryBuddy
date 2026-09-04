@@ -1,130 +1,148 @@
-# PantryBuddy API
+# PantryBuddy Backend API
 
-A REST API in front of the `pantry_buddy` MySQL schema (schema.sql /
-seed_data.sql), so the Flutter app can talk to a real database instead of
-its in-memory mock. This is step 3 of the chain: SQL schema → running DB →
-**this API server** → Flutter app.
+## Overview
 
-This has been smoke-tested end-to-end against a real MySQL 8.0 instance
-loaded with the exact schema.sql + seed_data.sql your friend provided —
-every route below was exercised and verified working before being handed
-over.
+This is the backend API for PantryBuddy, a household food-inventory
+application. It sits between the Flutter client application and the
+MySQL-compatible relational database (schema defined in `schema.sql` /
+`insert_static_data.sql`), exposing a REST interface that the client
+consumes instead of accessing the database directly.
 
-## Setup
+**Responsibilities of this layer:**
+- Authenticating users and authorising every subsequent request
+- Enforcing household-membership and admin-role access control
+- Implementing the application's business logic (e.g. matching a
+  user-entered item name against the shelf-life reference dataset,
+  computing suggested expiry dates)
+- Mediating all reads and writes to the database — the client never
+  connects to the database directly
 
-1. **Install Node.js** (18+) if you don't have it: https://nodejs.org
-2. `cd pantrybuddy-backend`
-3. `npm install`
-4. `cp .env.example .env`, then open `.env` and fill in the real database
-   host/user/password/database name your friend gave you. **Never commit
-   the real `.env`** — `.gitignore` already excludes it.
-5. `npm start` — you should see `PantryBuddy API listening on http://localhost:4000`
+**Stack:** Node.js, Express, `mysql2` (parameterised queries throughout —
+no raw string-interpolated SQL), `jsonwebtoken`, `bcryptjs`, `nodemailer`.
 
-To confirm it's actually connected and working:
+## Authentication & Authorisation
+
+Every request except `/health`, `/auth/signup`, `/auth/signin`, and
+`/auth/forgot-password` requires a valid **JSON Web Token**, issued at
+sign-up/sign-in and sent as `Authorization: Bearer <token>`. Tokens are
+signed with a server-held secret (`JWT_SECRET`) and expire after 24
+hours. Passwords are never stored in plain text - they're hashed with
+`bcrypt` before being written to the database.
+
+Authentication alone is not treated as sufficient authorisation. Every
+household-scoped route separately verifies that the requesting user is
+an active member of that specific household before allowing access, and
+admin-only actions (e.g. approving a join request) separately verify the
+requester holds the `ADMIN` role for that household. The identity used
+for any "who did this" field (item creator, join-request reviewer, etc.)
+is always taken from the verified token, never from the request body -
+so a request cannot claim to be acting on behalf of a different user.
+
+Password resets use a signed, time-limited (30-minute) token rather than
+a database-stored reset code. The token embeds a fragment of the
+password hash at the time it was issued; if the password changes before
+the token is used, that fragment no longer matches and the token is
+rejected — giving one-time-use behaviour without needing separate
+storage for reset tokens.
+
+## Getting Started
+
+1. Install Node.js 18+.
+2. `cd pantrybuddy-backend && npm install`
+3. Copy `.env.example` to `.env` and fill in database credentials, a
+   `JWT_SECRET`, and (optionally) Gmail credentials for password-reset
+   email — see "Email delivery" below.
+4. `npm start` - the server listens on `http://localhost:4000` by
+   default.
+
+Verify it's running and connected to the database:
 ```bash
 curl http://localhost:4000/health
-curl http://localhost:4000/households/1/inventory-items
 ```
-The second command should return the seeded inventory for "Lee Family
-Pantry" (team_id 1) if `seed_data.sql` was loaded — if you get a
-connection error instead, the `.env` values are the first thing to check.
 
-## Deploying it somewhere real
+### Deployment
 
-Running `npm start` on your own laptop only works while your laptop is on
-and the Flutter app is running on the *same machine* (`localhost`). For
-your phone or another device to reach it, you'll want to either:
-- Run it on the same Wi-Fi and use your laptop's local IP instead of
-  `localhost` (quick, but breaks when you change networks), or
-- Deploy it somewhere free/cheap like Render, Railway, or Fly.io (set the
-  same environment variables there instead of a local `.env`).
+The backend is structured to run as a Vercel serverless function
+(`api/index.js` re-exports the same Express app used by local
+development in `src/server.js`, so no code differs between the two
+environments). It can equally be deployed to any Node-hosting platform
+(Render, Railway, Fly.io) by setting the same environment variables.
 
-## Email (Gmail SMTP)
+### Email delivery
 
-Password-reset emails are sent through your own Gmail account (via [Nodemailer](https://nodemailer.com)) — completely free, no domain needed, and unlike a third-party email API's free tier, it works for **any** recipient, not just your own address.
+Password-reset emails are sent via Gmail SMTP (through
+[Nodemailer](https://nodemailer.com)), authenticated with a Google
+**App Password** rather than a normal account password. This requires
+`GMAIL_USER`, `GMAIL_APP_PASSWORD`, and `FRONTEND_URL` to be set. If
+they're not configured, the server does not fail — it logs the reset
+link to the console instead, so the rest of the system remains testable
+without email configured.
 
-1. On the Google Account you want to send from: turn on **2-Step Verification** (Google Account → Security) — required before you can generate an App Password.
-2. Google Account → Security → **App Passwords** → create one (name it anything, e.g. "PantryBuddy") → copy the 16-character password it gives you.
-3. Add to your local `.env`:
-   ```
-   GMAIL_USER=youraddress@gmail.com
-   GMAIL_APP_PASSWORD=the16charapppassword
-   FRONTEND_URL=https://pantrybuddy-yourname.vercel.app
-   ```
-4. Add the same three to Vercel's environment variables (Project Settings → Environment Variables) and redeploy — env var changes don't apply to already-running deployments.
+## API Surface
 
-**Note:** `GMAIL_APP_PASSWORD` is NOT your normal Gmail login password — using your real password won't work (and you shouldn't put it in an env var anyway). It's a separate, revocable 16-character password Google generates specifically for apps like this.
-
-If `GMAIL_USER`/`GMAIL_APP_PASSWORD` aren't set at all, the backend doesn't crash — it just logs the reset link to the server console instead of emailing it (useful for local testing without setting any of this up).
-
-Gmail's free sending limit is 500 emails/day — far more than a class project needs.
-
-## API surface
-
-All request/response bodies are JSON. IDs are always returned as strings
-(even though they're BIGINT in MySQL) to match the Flutter app's models.
+All request/response bodies are JSON. IDs are returned as strings (even
+though they are `BIGINT` in MySQL) to match the client's data models.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/auth/signup` | `{name, email, password, avatarKey}` → 409 if email taken |
-| POST | `/auth/signin` | `{email, password}` → 401 if wrong |
-| POST | `/auth/forgot-password` | `{email}` → always 200; sends a real reset email via Gmail SMTP (see "Email (Gmail SMTP)" above) |
-| POST | `/auth/reset-password` | `{token, newPassword}` → completes a reset started above |
-| GET/PATCH | `/users/:id` | |
-| POST | `/households` | `{name, creatorUserId}` — creator becomes ADMIN |
-| GET | `/households/:id` | |
-| GET | `/households/by-invite/:code` | invite code = the team's numeric ID |
-| GET | `/households/:id/members` | |
-| POST | `/join-requests` | `{inviteCode, userId}` → 409 if already a member or already pending |
-| GET | `/households/:id/join-requests?status=pending` | admin's pending list |
-| GET | `/join-requests/:id` | for the requester to poll their own status |
-| POST | `/join-requests/:id/approve` \| `/decline` | `{reviewedByUserId}` |
-| GET/POST | `/households/:id/inventory-items` | POST auto-creates the `products` row if needed (see below) |
-| PUT | `/inventory-items/:id` | |
-| POST | `/inventory-items/:id/resolve` | `{disposition: 'consumed'|'discarded', resolvedByUserId}` |
+| POST | `/auth/signup` | `{name, email, password, avatarKey}` → 409 if email already registered |
+| POST | `/auth/signin` | `{email, password}` → 401 if incorrect |
+| POST | `/auth/forgot-password` | `{email}` → always 200 (does not reveal whether the email is registered); sends a signed reset link by email |
+| POST | `/auth/reset-password` | `{token, newPassword}` → completes a reset; rejects an already-used or expired token |
+| GET/PATCH | `/users/:id` | PATCH restricted to the authenticated user's own profile |
+| POST | `/households` | `{name}` — creator is recorded as ADMIN (from the verified token, not the request body) |
+| GET | `/households/:id` | Requires household membership |
+| GET | `/households/by-invite/:code` | Public to any authenticated user (invite code = the household's numeric ID) — intentionally not membership-gated, since this is how a non-member looks up a household before requesting to join |
+| GET | `/households/:id/members` | Requires household membership |
+| POST | `/join-requests` | `{inviteCode}` → 409 if already a member or already pending |
+| GET | `/households/:id/join-requests?status=pending` | Admin-only |
+| GET | `/join-requests/:id` | Restricted to the requester who submitted it |
+| POST | `/join-requests/:id/approve` \| `/decline` | Admin-only |
+| GET/POST | `/households/:id/inventory-items` | POST auto-creates the matching `products` row if one doesn't already exist |
+| PUT | `/inventory-items/:id` | Requires membership in the item's household |
+| POST | `/inventory-items/:id/resolve` | `{disposition: 'consumed'|'discarded'}` |
 | DELETE | `/inventory-items/:id` | |
-| POST | `/reminders` | `{itemId, householdId, leadTimeDays, createdByUserId}` |
+| POST | `/reminders` | `{itemId, householdId, leadTimeDays}` |
 | GET | `/households/:id/reminders` | |
 | POST | `/reminders/:id/mark-triggered` | |
-| GET | `/households/:id/activity` | derived from `inventory_transactions` + `team_members`, see below |
+| GET | `/households/:id/activity` | Derived from `inventory_transactions` + `team_members` (see Data Model Notes) |
+| GET | `/shelf-life-suggestion`, `/storage-suggestions` | Matches an item name/category against the reference dataset; falls back from product-specific to category-level guidance |
 
-## Known gaps / schema mismatches (worth flagging to your friend)
+## Data Model Notes & Current Limitations
 
-1. **No `unit` column.** `inventory_items.quantity` is a bare number —
-   there's no column for "pcs" / "g" / "cans" etc. The API currently
-   always returns `unit: "pcs"` and doesn't persist whatever the app
-   sends. Fix: add `unit VARCHAR(20) NULL` to `inventory_items`, then
-   it's a 2-line change in `src/routes/inventory.js`.
-2. **`avatar_id` has no catalog table.** `src/util/avatars.js` hardcodes
-   a 12-avatar list matching the Flutter app's order (1=tomato,
-   2=carrot, ...). Fine for now, but fragile if either side changes
-   independently — a real `avatars` table would be cleaner.
-3. **No "Donate" status.** `inventory_items.status` only has
-   `IN_STOCK/CONSUMED/EXPIRED/DISCARDED` — the app already dropped its
-   Donate button to match. Add `DONATED` to the enum (in both
-   `inventory_items.status` and `inventory_transactions.transaction_type`)
-   if you want it back.
-4. **Activity feed is derived, not stored.** There's no activity-log
-   table in the schema, so `GET /households/:id/activity` is assembled
-   from `inventory_transactions` (ADD/CONSUME/DISCARD) plus
-   `team_members.joined_at`. This means item **edits** don't show up in
-   the feed (no transaction type for that) — only add/consume/discard/join.
-5. **Password reset works, but relies on one Gmail account.** All reset
-   emails send through whoever's `GMAIL_USER` is configured — fine for a
-   class project, but a real product would use a dedicated transactional
-   email service instead of a personal inbox.
-6. **`notification_recipients` isn't used yet.** Multi-user per-reminder
-   read state isn't implemented in either the app or this API yet.
-7. **`reminders.status = 'CANCELLED'`** has no API route yet (no
-   "cancel reminder" feature in the app currently).
+- **Activity feed is derived, not stored.** There is no dedicated
+  activity-log table; `GET /households/:id/activity` is assembled from
+  `inventory_transactions` (add/consume/discard events) and
+  `team_members.joined_at`. Item *edits* do not currently appear in the
+  feed, as there is no transaction type recorded for them.
+- **No "Donate" disposition.** `inventory_items.status` supports
+  `IN_STOCK/CONSUMED/EXPIRED/DISCARDED`. A donate option was considered
+  during development but intentionally scoped out of this iteration
+  rather than implemented against an unsupported status value; noted as
+  a candidate for a future iteration pending a schema change.
+- **Reminder cancellation has no route yet.** The schema supports a
+  `CANCELLED` reminder status, but no endpoint currently sets it.
+- **Per-user reminder read-state is unused.** The
+  `notification_recipients` table exists in the schema but is not yet
+  read from or written to.
+- **Avatar catalogue is hardcoded, not a database table.**
+  `src/util/avatars.js` maps a fixed 12-item list to match the client's
+  avatar picker order. Adequate for the current scope; a proper
+  `avatars` table would be a cleaner long-term approach.
+- **Password-reset email relies on a single Gmail account** rather than
+  a dedicated transactional email provider — an appropriate trade-off
+  for this project's scale, and noted as a change a production
+  deployment would make.
 
-## Testing scenarios
+## Testing
 
-Your friend's `test_data.sql` has 32 scenarios for testing the schema
-directly in MySQL. This API doesn't re-implement those as automated
-tests, but every route was manually exercised against a real MySQL 8.0
-instance loaded with `schema.sql` + `seed_data.sql` before being handed
-over — signup/duplicate-email, signin/wrong-password, household
-creation, join-request + approve + duplicate-pending-request rejection,
-member listing, item add/list/resolve, reminder creation, and the
-activity feed all returned correct results.
+Every route was exercised manually against a live MySQL instance loaded
+with the project's real schema and seed data (and subsequently against
+the deployed cloud database), covering both expected behaviour and
+deliberate negative-path/security scenarios — including missing or
+invalid tokens, cross-household access attempts, and privilege
+escalation attempts (a non-admin approving a join request; a user
+editing another user's profile). All such attempts were confirmed to be
+correctly rejected. A detailed, itemised record of test cases and the
+defects they surfaced is maintained separately in the project's Testing
+Folder documentation.
