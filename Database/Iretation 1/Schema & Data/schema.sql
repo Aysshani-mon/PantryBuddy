@@ -176,7 +176,9 @@ CREATE TABLE inventory_items (
   expiry_date       DATE             NULL,
   expiry_date_source ENUM('PACKAGING','USER_INPUT','CALCULATED') NOT NULL,
   checkout_date     DATETIME         NULL,
-  status            ENUM('IN_STOCK','CONSUMED','EXPIRED','DISCARDED') NOT NULL DEFAULT 'IN_STOCK',
+  status            ENUM('IN_STOCK','CONSUMED','EXPIRED','DISCARDED','DONATED') NOT NULL DEFAULT 'IN_STOCK',
+  discard_reason    VARCHAR(30)      NULL,
+  consumed_amount   VARCHAR(20)      NULL,
   created_at        DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (inventory_item_id),
@@ -208,7 +210,7 @@ CREATE TABLE inventory_transactions (
   transaction_id    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   inventory_item_id BIGINT UNSIGNED NOT NULL,
   user_id           BIGINT UNSIGNED NOT NULL,
-  transaction_type  ENUM('ADD','CONSUME','DISCARD') NOT NULL,
+  transaction_type  ENUM('ADD','CONSUME','DISCARD','DONATE') NOT NULL,
   quantity          DECIMAL(10,2)   NOT NULL,
   transaction_time  DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   note              VARCHAR(500)    NULL,
@@ -322,4 +324,31 @@ CREATE TABLE notification_recipients (
 --
 -- These statements must NOT be re-run on a database that already
 -- contains the columns, because duplicate columns would be rejected.
+-- ============================================================
+
+-- ============================================================
+-- MIGRATION NOTE (existing databases only) - DONATION FIELDS
+-- The fresh schema above already includes the DONATED status, the
+-- DONATE transaction type and the two extra inventory_item columns.
+-- Backend teams upgrading a database created before this change
+-- should execute the following ALTER statements once:
+--
+--   ALTER TABLE inventory_items
+--     MODIFY COLUMN status
+--       ENUM('IN_STOCK','CONSUMED','EXPIRED','DISCARDED','DONATED')
+--       NOT NULL DEFAULT 'IN_STOCK';
+--
+--   ALTER TABLE inventory_transactions
+--     MODIFY COLUMN transaction_type
+--       ENUM('ADD','CONSUME','DISCARD','DONATE') NOT NULL;
+--
+--   ALTER TABLE inventory_items
+--     ADD COLUMN discard_reason VARCHAR(30) NULL AFTER status;
+--
+--   ALTER TABLE inventory_items
+--     ADD COLUMN consumed_amount VARCHAR(20) NULL AFTER discard_reason;
+--
+-- These statements must NOT be re-run on a database that already
+-- contains the changes, because duplicate columns or identical
+-- MODIFY statements would be rejected or be unnecessary.
 -- ============================================================

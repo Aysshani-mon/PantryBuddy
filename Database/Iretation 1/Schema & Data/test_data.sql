@@ -16,7 +16,7 @@
 --     to simulate concurrent-safe stock updates.
 --   * Shelf-life lookup tests (scenarios 13-15) verify the rule
 --     priority and fallback behavior of shelf_life_rules.
---   * Scenario 35 is the only block without a transaction because
+--   * Scenario 36 is the only block without a transaction because
 --     DDL statements cause implicit commits in MySQL.
 -- ============================================================
 
@@ -448,6 +448,7 @@ VALUES (1, 1, 'CONSUME', 0.50, 'Partial consumption test');
 
 UPDATE inventory_items
 SET quantity = quantity - 0.50,
+    consumed_amount = '0.50',
     updated_at = CURRENT_TIMESTAMP
 WHERE inventory_item_id = 1;
 
@@ -480,6 +481,7 @@ VALUES (5, 1, 'CONSUME', @full_qty, 'Full consumption test');
 UPDATE inventory_items
 SET status = 'CONSUMED',
     checkout_date = NOW(),
+    consumed_amount = @full_qty,
     updated_at = CURRENT_TIMESTAMP
 WHERE inventory_item_id = 5;
 
@@ -538,18 +540,19 @@ VALUES (6, 1, 'DISCARD', 4.00, 'Discard test', 'USER_DISCARDED');
 UPDATE inventory_items
 SET status = 'DISCARDED',
     checkout_date = NOW(),
+    discard_reason = 'USER_DISCARDED',
     updated_at = CURRENT_TIMESTAMP
 WHERE inventory_item_id = 6;
 
 SELECT i.inventory_item_id, i.status, i.checkout_date,
-       t.transaction_type, t.discard_reason
+       i.discard_reason, t.transaction_type, t.discard_reason
 FROM inventory_items i
 JOIN inventory_transactions t USING (inventory_item_id)
 WHERE i.inventory_item_id = 6
 ORDER BY t.transaction_id DESC
 LIMIT 1;
--- Expected: status 'DISCARDED', transaction 'DISCARD',
---           discard_reason 'USER_DISCARDED'
+-- Expected: item status 'DISCARDED' and item discard_reason 'USER_DISCARDED',
+--           transaction 'DISCARD' with discard_reason 'USER_DISCARDED'
 
 ROLLBACK;
 
@@ -571,17 +574,19 @@ VALUES (8, 1, 'DISCARD', 6.00, 'Found expired during fridge check', 'EXPIRED');
 UPDATE inventory_items
 SET status = 'DISCARDED',
     checkout_date = NOW(),
+    discard_reason = 'EXPIRED',
     updated_at = CURRENT_TIMESTAMP
 WHERE inventory_item_id = 8;
 
 SELECT i.inventory_item_id, i.status, i.checkout_date,
-       t.transaction_type, t.discard_reason
+       i.discard_reason, t.transaction_type, t.discard_reason
 FROM inventory_items i
 JOIN inventory_transactions t USING (inventory_item_id)
 WHERE i.inventory_item_id = 8
 ORDER BY t.transaction_id DESC
 LIMIT 1;
--- Expected: status 'DISCARDED', discard_reason 'EXPIRED'
+-- Expected: item status 'DISCARDED' and item discard_reason 'EXPIRED',
+--           transaction 'DISCARD' with discard_reason 'EXPIRED'
 
 ROLLBACK;
 
@@ -603,22 +608,61 @@ VALUES (13, 3, 'DISCARD', 1.00, 'No longer wanted', 'USER_DISCARDED');
 UPDATE inventory_items
 SET status = 'DISCARDED',
     checkout_date = NOW(),
+    discard_reason = 'USER_DISCARDED',
     updated_at = CURRENT_TIMESTAMP
 WHERE inventory_item_id = 13;
 
 SELECT i.inventory_item_id, i.status, i.checkout_date,
-       t.transaction_type, t.discard_reason
+       i.discard_reason, t.transaction_type, t.discard_reason
 FROM inventory_items i
 JOIN inventory_transactions t USING (inventory_item_id)
 WHERE i.inventory_item_id = 13
 ORDER BY t.transaction_id DESC
 LIMIT 1;
--- Expected: status 'DISCARDED', discard_reason 'USER_DISCARDED'
+-- Expected: item status 'DISCARDED' and item discard_reason 'USER_DISCARDED',
+--           transaction 'DISCARD' with discard_reason 'USER_DISCARDED'
 
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 23: Invalid FK rejection
+-- SCENARIO 23: Item donation (DONATE / DONATED)
+-- Verify that an item can be donated: a DONATE transaction is
+-- recorded and the item status becomes DONATED with an item-level
+-- discard_reason. The transaction-level discard_reason stays NULL
+-- because that field is reserved for DISCARD transactions.
+-- ============================================================
+START TRANSACTION;
+
+SELECT inventory_item_id, quantity, status
+FROM inventory_items
+WHERE inventory_item_id = 5
+FOR UPDATE;
+
+INSERT INTO inventory_transactions
+  (inventory_item_id, user_id, transaction_type, quantity, note, discard_reason)
+VALUES (5, 1, 'DONATE', 12.00, 'Donated unopened case to a food bank', NULL);
+
+UPDATE inventory_items
+SET status = 'DONATED',
+    checkout_date = NOW(),
+    discard_reason = 'DONATED',
+    updated_at = CURRENT_TIMESTAMP
+WHERE inventory_item_id = 5;
+
+SELECT i.inventory_item_id, i.status, i.checkout_date, i.discard_reason,
+       t.transaction_type, t.discard_reason AS txn_discard_reason
+FROM inventory_items i
+JOIN inventory_transactions t USING (inventory_item_id)
+WHERE i.inventory_item_id = 5
+ORDER BY t.transaction_id DESC
+LIMIT 1;
+-- Expected: item status 'DONATED', item discard_reason 'DONATED',
+--           transaction type 'DONATE', transaction discard_reason NULL
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 24: Invalid FK rejection
 -- Inserting an inventory item with a non-existent team, product or
 -- creator must fail because of the foreign key constraints.
 -- ============================================================
@@ -645,7 +689,7 @@ VALUES (1, 999999, 1, 1, 1.00, 'pcs', NULL, CURDATE(), 'PACKAGING');
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 24: Product search
+-- SCENARIO 25: Product search
 -- Verify that products can be searched by name (case-insensitive
 -- thanks to the utf8mb4_unicode_ci collation).
 -- ============================================================
@@ -664,7 +708,7 @@ WHERE LOWER(product_name) LIKE '%milk%';
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 25: Inventory filtering
+-- SCENARIO 26: Inventory filtering
 -- Verify that inventory can be filtered by team, status and storage.
 -- ============================================================
 START TRANSACTION;
@@ -682,7 +726,7 @@ ORDER BY i.expiry_date;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 26: Home summary queries
+-- SCENARIO 27: Home summary queries
 -- Verify aggregate queries used by the home screen: totals per team,
 -- status counts and items expiring within the next 7 days.
 -- ============================================================
@@ -715,7 +759,7 @@ ORDER BY i.expiry_date;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 27: Reminder creation
+-- SCENARIO 28: Reminder creation
 -- Verify that a reminder can be created for an inventory item.
 -- ============================================================
 START TRANSACTION;
@@ -735,7 +779,7 @@ WHERE reminder_id = @test_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 28: Default 3-day reminder
+-- SCENARIO 29: Default 3-day reminder
 -- Verify that omitting lead_time_days uses the default value of 3
 -- and that reminder_at is derived from the expiry date.
 -- ============================================================
@@ -760,7 +804,7 @@ WHERE r.reminder_id = @default_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 29: Custom reminder lead time
+-- SCENARIO 30: Custom reminder lead time
 -- Verify that a reminder supports a custom lead time (e.g. 7 days).
 -- ============================================================
 START TRANSACTION;
@@ -783,7 +827,7 @@ WHERE r.reminder_id = @custom_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 30: Reminder cancellation
+-- SCENARIO 31: Reminder cancellation
 -- Verify that a reminder can be cancelled and records cancelled_at.
 -- ============================================================
 START TRANSACTION;
@@ -807,7 +851,7 @@ WHERE reminder_id = @cancel_reminder;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 31: Multiple notification recipients
+-- SCENARIO 32: Multiple notification recipients
 -- Verify that a reminder can notify several users at once.
 -- ============================================================
 START TRANSACTION;
@@ -831,7 +875,7 @@ GROUP BY r.reminder_id;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 32: Independent read/unread state
+-- SCENARIO 33: Independent read/unread state
 -- Verify that each recipient has its own read state; marking one
 -- recipient as read must not affect the others.
 -- ============================================================
@@ -861,7 +905,7 @@ ORDER BY user_id;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 33: Foreign-key delete behavior
+-- SCENARIO 34: Foreign-key delete behavior
 -- Verify CASCADE (team deletion removes members, inventory,
 -- reminders and recipients; product deletion removes product-level
 -- shelf-life rules), SET NULL (deleting a reviewer keeps the request
@@ -943,7 +987,7 @@ DELETE FROM users WHERE user_id = 1;
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 34: Seed data loading
+-- SCENARIO 35: Seed data loading
 -- Verify that seed_data.sql populated every table with the
 -- expected minimum number of rows.
 -- ============================================================
@@ -974,12 +1018,14 @@ SELECT IF(COUNT(*) >= 300, 'PASS', 'FAIL') AS min_shelf_life_rules_check FROM sh
 SELECT IF(SUM(product_id IS NOT NULL) >= 300, 'PASS', 'FAIL') AS product_level_rules_check FROM shelf_life_rules;
 SELECT IF(SUM(product_id IS NULL) >= 18, 'PASS', 'FAIL') AS category_level_rules_check FROM shelf_life_rules;
 SELECT IF(COUNT(*) >= 5, 'PASS', 'FAIL') AS min_reminders_check FROM reminders;
+SELECT IF(SUM(status = 'DONATED') >= 1, 'PASS', 'FAIL') AS donated_items_check FROM inventory_items;
+SELECT IF(SUM(transaction_type = 'DONATE') >= 1, 'PASS', 'FAIL') AS donate_txn_check FROM inventory_transactions;
 -- Expected: every table non-empty; all checks PASS
 
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 35: Clean schema recreation
+-- SCENARIO 36: Clean schema recreation
 -- Drop every table (reverse dependency order) so the schema can be
 -- recreated from scratch. DDL causes implicit commits in MySQL, so
 -- this block intentionally runs without a transaction.
