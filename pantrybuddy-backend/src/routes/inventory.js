@@ -7,6 +7,7 @@ const { assertMember, assertMemberForItem } = require('../util/household_access'
 const router = express.Router();
 
 function itemRowToJson(row) {
+  const dispositionMap = { CONSUMED: 'consumed', DISCARDED: 'discarded', DONATED: 'donated' };
   return {
     id: String(row.inventory_item_id),
     householdId: String(row.team_id),
@@ -19,7 +20,9 @@ function itemRowToJson(row) {
     useByDate: row.expiry_date,
     addedAt: row.entry_date,
     addedByUserId: String(row.created_by),
-    disposition: row.status === 'CONSUMED' ? 'consumed' : row.status === 'DISCARDED' ? 'discarded' : null,
+    disposition: dispositionMap[row.status] ?? null,
+    discardReason: row.discard_reason,
+    consumedAmount: row.consumed_amount,
     resolvedAt: row.checkout_date,
   };
 }
@@ -164,13 +167,25 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-// POST /inventory-items/:id/resolve { disposition: 'consumed'|'discarded' }
+// Valid values the client can send for the new subjective fields —
+// validated server-side so bad/unexpected values can't get stored.
+const VALID_DISCARD_REASONS = ['spoiled', 'expired_not_spoiled', 'quality_declined', 'other'];
+const VALID_CONSUMED_AMOUNTS = ['partial', 'half', 'full'];
+
+// POST /inventory-items/:id/resolve
+// { disposition: 'consumed'|'discarded'|'donated', discardReason?, consumedAmount? }
 // resolvedByUserId is always req.userId, never trusted from the body.
 router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
   await assertMemberForItem(req.userId, req.params.id);
-  const { disposition } = req.body;
-  if (!['consumed', 'discarded'].includes(disposition)) {
-    throw new ApiError(400, "disposition must be 'consumed' or 'discarded'.");
+  const { disposition, discardReason, consumedAmount } = req.body;
+  if (!['consumed', 'discarded', 'donated'].includes(disposition)) {
+    throw new ApiError(400, "disposition must be 'consumed', 'discarded', or 'donated'.");
+  }
+  if (discardReason !== undefined && discardReason !== null && !VALID_DISCARD_REASONS.includes(discardReason)) {
+    throw new ApiError(400, `discardReason must be one of: ${VALID_DISCARD_REASONS.join(', ')}`);
+  }
+  if (consumedAmount !== undefined && consumedAmount !== null && !VALID_CONSUMED_AMOUNTS.includes(consumedAmount)) {
+    throw new ApiError(400, `consumedAmount must be one of: ${VALID_CONSUMED_AMOUNTS.join(', ')}`);
   }
   const resolvedByUserId = req.userId;
   const conn = await pool.getConnection();
@@ -181,24 +196,34 @@ router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
     const item = rows[0];
     if (item.status !== 'IN_STOCK') throw new ApiError(409, 'This item has already been resolved.');
 
-    const newStatus = disposition === 'consumed' ? 'CONSUMED' : 'DISCARDED';
+    const statusMap = { consumed: 'CONSUMED', discarded: 'DISCARDED', donated: 'DONATED' };
+    const newStatus = statusMap[disposition];
     await conn.query(
-      'UPDATE inventory_items SET status = ?, checkout_date = NOW() WHERE inventory_item_id = ?',
-      [newStatus, req.params.id]
+      'UPDATE inventory_items SET status = ?, checkout_date = NOW(), discard_reason = ?, consumed_amount = ? WHERE inventory_item_id = ?',
+      [newStatus, disposition === 'discarded' ? (discardReason || null) : null, disposition === 'consumed' ? (consumedAmount || null) : null, req.params.id]
     );
 
     if (disposition === 'consumed') {
       await conn.query(
         `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
-         VALUES (?, ?, 'CONSUME', ?, 'Marked consumed')`,
-        [req.params.id, resolvedByUserId, item.quantity]
+         VALUES (?, ?, 'CONSUME', ?, ?)`,
+        [req.params.id, resolvedByUserId, item.quantity, consumedAmount ? `Marked consumed (${consumedAmount})` : 'Marked consumed']
       );
-    } else {
-      const discardReason = item.expiry_date && new Date(item.expiry_date) < new Date() ? 'EXPIRED' : 'USER_DISCARDED';
+    } else if (disposition === 'discarded') {
+      // Transaction-level discard_reason is a separate, auto-computed
+      // timing classification (was it already past its expiry date?) —
+      // distinct from the user's own stated reason stored on the item.
+      const timingReason = item.expiry_date && new Date(item.expiry_date) < new Date() ? 'EXPIRED' : 'USER_DISCARDED';
       await conn.query(
         `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note, discard_reason)
-         VALUES (?, ?, 'DISCARD', ?, 'Marked discarded', ?)`,
-        [req.params.id, resolvedByUserId, item.quantity, discardReason]
+         VALUES (?, ?, 'DISCARD', ?, ?, ?)`,
+        [req.params.id, resolvedByUserId, item.quantity, discardReason ? `Marked discarded (${discardReason})` : 'Marked discarded', timingReason]
+      );
+    } else {
+      await conn.query(
+        `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
+         VALUES (?, ?, 'DONATE', ?, 'Marked donated')`,
+        [req.params.id, resolvedByUserId, item.quantity]
       );
     }
     await conn.commit();
