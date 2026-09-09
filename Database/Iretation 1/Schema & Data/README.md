@@ -8,7 +8,7 @@ This folder contains the complete MySQL implementation for the Household Invento
 | --- | --- |
 | `schema.sql` | Creates the `pantry_buddy` database and all 12 tables with indexes, constraints and foreign keys. |
 | `seed_data.sql` | Loads representative English seed data (users, teams, products, inventory, rules, reminders, recipients). |
-| `test_data.sql` | Contains 35 executable test scenarios for manual verification. |
+| `test_data.sql` | Contains 36 executable test scenarios for manual verification. |
 | `README.md` | This documentation. |
 
 ## Prerequisites
@@ -30,18 +30,21 @@ The schema contains exactly 12 tables and no additional summary, ML or predictio
 | 5 | `product_categories` | Product categories such as Dairy, Meat, Vegetables. |
 | 6 | `products` | Product catalogue; barcode is optional but unique. |
 | 7 | `storage_types` | Storage locations: FRIDGE, FREEZER, PANTRY. |
-| 8 | `inventory_items` | Stock entries owned by a team for a product at a storage location. |
-| 9 | `inventory_transactions` | Audit trail of ADD / CONSUME / DISCARD operations. |
+| 8 | `inventory_items` | Stock entries owned by a team for a product at a storage location, with statuses IN_STOCK / CONSUMED / EXPIRED / DISCARDED / DONATED. |
+| 9 | `inventory_transactions` | Audit trail of ADD / CONSUME / DISCARD / DONATE operations. |
 | 10 | `shelf_life_rules` | Shelf-life rules with evidence metadata; supports product-level rules and category-level fallbacks. |
 | 11 | `reminders` | Expiry reminders for inventory items. |
 | 12 | `notification_recipients` | Users notified for a reminder, with per-user read state. |
 
 ### `inventory_items` Extra Fields
 
-The `inventory_items` table stores two fields for item quantities and notes:
+The `inventory_items` table stores fields for item quantities, notes and disposal tracking:
 
 - **`unit`** (`VARCHAR(20)`, `NOT NULL`, default `'pcs'`) - Unit of measurement for the item (e.g. `pcs`, `kg`, `g`, `L`, `ml`, `dozen`). The column is placed immediately after `quantity`.
 - **`notes`** (`VARCHAR(500)`, nullable) - Optional user notes about the item (e.g. opened status, partial consumption notes). The column is placed immediately after `unit`.
+- **`discard_reason`** (`VARCHAR(30)`, nullable) - Reason the item left stock, e.g. `EXPIRED`, `USER_DISCARDED` or `DONATED`. The column is placed immediately after `status`.
+- **`consumed_amount`** (`VARCHAR(20)`, nullable) - Optional human-readable amount consumed, e.g. `0.50` or `2.00`. The column is placed immediately after `discard_reason`.
+- **`status`** accepts `IN_STOCK`, `CONSUMED`, `EXPIRED`, `DISCARDED` and `DONATED` (default `IN_STOCK`).
 
 **Migration note for existing databases** (for the backend team; do not run these on a fresh database where the columns already exist):
 
@@ -51,6 +54,25 @@ ALTER TABLE inventory_items
 
 ALTER TABLE inventory_items
   ADD COLUMN notes VARCHAR(500) NULL AFTER unit;
+```
+
+**Donation migration note for existing databases** (for the backend team; the fresh schema already contains these changes):
+
+```sql
+ALTER TABLE inventory_items
+  MODIFY COLUMN status
+    ENUM('IN_STOCK','CONSUMED','EXPIRED','DISCARDED','DONATED')
+    NOT NULL DEFAULT 'IN_STOCK';
+
+ALTER TABLE inventory_transactions
+  MODIFY COLUMN transaction_type
+    ENUM('ADD','CONSUME','DISCARD','DONATE') NOT NULL;
+
+ALTER TABLE inventory_items
+  ADD COLUMN discard_reason VARCHAR(30) NULL AFTER status;
+
+ALTER TABLE inventory_items
+  ADD COLUMN consumed_amount VARCHAR(20) NULL AFTER discard_reason;
 ```
 
 ## Relationships
@@ -95,7 +117,10 @@ ALTER TABLE inventory_items
 - `products.barcode` is unique (`uq_products_barcode`) and nullable; it is stored as `VARCHAR(50)`, never as an integer.
 - `inventory_items.quantity` must be greater than 0 (`CHECK`).
 - `inventory_items.shelf_life_days` must be greater than or equal to 0 when provided.
+- `inventory_items.status` is one of `IN_STOCK`, `CONSUMED`, `EXPIRED`, `DISCARDED` or `DONATED`.
+- `inventory_items.discard_reason` stores the reason an item left stock (e.g. `EXPIRED`, `USER_DISCARDED`, `DONATED`); `consumed_amount` stores an optional readable amount consumed.
 - `expiry_date_source` is one of `PACKAGING` (printed on the package), `USER_INPUT` (entered by the user) or `CALCULATED` (production date + shelf life).
+- `inventory_transactions.transaction_type` is one of `ADD`, `CONSUME`, `DISCARD` or `DONATE`.
 - `inventory_transactions.discard_reason` may be non-NULL only when `transaction_type = 'DISCARD'`; otherwise it must be NULL.
 - `shelf_life_rules.min_days` must be >= 0 and `max_days` must be >= `min_days` (`CHECK` constraints).
 - `shelf_life_rules` has a unique key on `(product_id, storage_type_id)`: at most one product-level rule per product and storage type. Multiple category-level rules (`product_id IS NULL`) are allowed because MySQL does not compare NULLs in unique indexes.
@@ -129,8 +154,8 @@ Additional rule: non-fresh items (`product_categories.is_fresh_food = FALSE`) mu
 | `product_categories` | 9 | Dairy, Meat, Seafood, Vegetables, Fruits, Snacks, Beverages, Frozen Food, Household Items. |
 | `products` | 114 | 50 Fruits and 50 Seafood products (e.g. Starfruit, Papaya, Cempedak, Sapodilla, Dokong, Mango, Salmon, Tuna), plus the original product set. |
 | `storage_types` | 3 | FRIDGE, FREEZER, PANTRY. |
-| `inventory_items` | 17 | Mixed statuses: IN_STOCK, CONSUMED, EXPIRED, DISCARDED. |
-| `inventory_transactions` | 21 | ADD / CONSUME / DISCARD history, including an EXPIRED discard. |
+| `inventory_items` | 18 | Mixed statuses: IN_STOCK, CONSUMED, EXPIRED, DISCARDED, DONATED. |
+| `inventory_transactions` | 22 | ADD / CONSUME / DISCARD / DONATE history, including an EXPIRED discard and a donation. |
 | `shelf_life_rules` | 318 | 300 product-level rules (100 products x 3 storage types), 6 category-level fallbacks (Fruits and Seafood), 12 NOT_RECOMMENDED placeholders for non-fresh categories. |
 | `reminders` | 7 | Lead times of 1, 2, 3 and 5 days; PENDING, TRIGGERED and CANCELLED. |
 | `notification_recipients` | 12 | Multiple recipients per reminder with independent read state. |
@@ -150,7 +175,7 @@ Both scripts contain a `USE pantry_buddy;` statement, so the database is selecte
 
 ## Testing
 
-`test_data.sql` contains 35 scenarios for manual verification. Because several blocks intentionally raise errors (duplicate email, duplicate barcode, invalid foreign keys, over-consumption rejection), run the script with `--force` so that execution does not stop at the first expected error:
+`test_data.sql` contains 36 scenarios for manual verification. Because several blocks intentionally raise errors (duplicate email, duplicate barcode, invalid foreign keys, over-consumption rejection), run the script with `--force` so that execution does not stop at the first expected error:
 
 ```bash
 mysql -u root -p --force pantry_buddy < test_data.sql
@@ -163,9 +188,9 @@ Alternatively, copy individual scenario blocks into a MySQL client and inspect e
 - Every scenario runs inside a transaction and rolls back afterwards, so the script is repeatable and leaves no test data behind.
 - Consume and discard scenarios lock the target row with `SELECT ... FOR UPDATE` before updating stock, simulating concurrent-safe operations.
 - Scenarios 13-15 verify the shelf-life rule lookup: product-level priority, category-level fallback, and the non-fresh exclusion.
-- Scenario 35 (clean schema recreation) is the only block without a transaction, because DDL statements cause implicit commits in MySQL. After it runs, re-import `schema.sql` and `seed_data.sql`.
+- Scenario 36 (clean schema recreation) is the only block without a transaction, because DDL statements cause implicit commits in MySQL. After it runs, re-import `schema.sql` and `seed_data.sql`.
 
-### The 35 Scenarios
+### The 36 Scenarios
 
 | # | Scenario | What it verifies |
 | --- | --- | --- |
@@ -191,19 +216,20 @@ Alternatively, copy individual scenario blocks into a MySQL client and inspect e
 | 20 | Discard | An item is discarded with a valid discard reason. |
 | 21 | Expired discard | An expired item is discarded with reason EXPIRED. |
 | 22 | User-discarded item | An item is discarded with reason USER_DISCARDED. |
-| 23 | Invalid FK rejection | Inserts with non-existent parents fail. |
-| 24 | Product search | Products can be searched by name. |
-| 25 | Inventory filtering | Inventory can be filtered by team, status and storage. |
-| 26 | Home summary queries | Aggregates per team and expiring-soon lists work. |
-| 27 | Reminder creation | A reminder can be created. |
-| 28 | Default 3-day reminder | lead_time_days defaults to 3. |
-| 29 | Custom reminder lead time | A custom lead time such as 7 days is supported. |
-| 30 | Reminder cancellation | A reminder can be cancelled with cancelled_at set. |
-| 31 | Multiple notification recipients | A reminder can notify several users. |
-| 32 | Independent read/unread state | Each recipient's read state is independent. |
-| 33 | Foreign-key delete behavior | CASCADE, SET NULL and RESTRICT all behave as designed, including product-rule cascade. |
-| 34 | Seed data loading | Every table is populated, including 100+ products and 300+ shelf-life rules. |
-| 35 | Clean schema recreation | All tables can be dropped and recreated from scratch. |
+| 23 | Item donation (DONATE / DONATED) | A DONATE transaction is recorded and the item status becomes DONATED. |
+| 24 | Invalid FK rejection | Inserts with non-existent parents fail. |
+| 25 | Product search | Products can be searched by name. |
+| 26 | Inventory filtering | Inventory can be filtered by team, status and storage. |
+| 27 | Home summary queries | Aggregates per team and expiring-soon lists work. |
+| 28 | Reminder creation | A reminder can be created. |
+| 29 | Default 3-day reminder | lead_time_days defaults to 3. |
+| 30 | Custom reminder lead time | A custom lead time such as 7 days is supported. |
+| 31 | Reminder cancellation | A reminder can be cancelled with cancelled_at set. |
+| 32 | Multiple notification recipients | A reminder can notify several users. |
+| 33 | Independent read/unread state | Each recipient's read state is independent. |
+| 34 | Foreign-key delete behavior | CASCADE, SET NULL and RESTRICT all behave as designed, including product-rule cascade. |
+| 35 | Seed data loading | Every table is populated, including 100+ products, 300+ shelf-life rules and donation samples. |
+| 36 | Clean schema recreation | All tables can be dropped and recreated from scratch. |
 
 ## Design Notes
 
