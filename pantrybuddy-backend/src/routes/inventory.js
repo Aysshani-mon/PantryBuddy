@@ -1,10 +1,19 @@
 const express = require('express');
 const pool = require('../db');
-const { ApiError, asyncHandler } = require('../util/errors');
+const { avatarIdToKey } = require('../util/avatars');
 const { CATEGORY_DB_NAMES, CATEGORY_DART_NAMES, STORAGE_DB_NAMES, STORAGE_DART_NAMES } = require('../util/enums');
 const { assertMember, assertMemberForItem } = require('../util/household_access');
+const { ApiError, asyncHandler } = require('../util/errors');
 
 const router = express.Router();
+
+const ITEM_SELECT = `
+  SELECT ii.*, p.product_name, pc.category_name, st.storage_name
+  FROM inventory_items ii
+  JOIN products p ON p.product_id = ii.product_id
+  JOIN product_categories pc ON pc.category_id = p.category_id
+  JOIN storage_types st ON st.storage_type_id = ii.storage_type_id
+`;
 
 function itemRowToJson(row) {
   const dispositionMap = { CONSUMED: 'consumed', DISCARDED: 'discarded', DONATED: 'donated' };
@@ -20,6 +29,10 @@ function itemRowToJson(row) {
     useByDate: row.expiry_date,
     addedAt: row.entry_date,
     addedByUserId: String(row.created_by),
+    // status stays IN_STOCK for a partially/half-consumed item — only a
+    // FULLY resolved item (fully consumed, discarded, donated) has a
+    // disposition. consumedAmount can be present even while disposition
+    // is still null (see the resolve endpoint below).
     disposition: dispositionMap[row.status] ?? null,
     discardReason: row.discard_reason,
     consumedAmount: row.consumed_amount,
@@ -27,41 +40,37 @@ function itemRowToJson(row) {
   };
 }
 
-const ITEM_SELECT = `
-  SELECT ii.*, p.product_name, p.category_id, pc.category_name, st.storage_name
-  FROM inventory_items ii
-  JOIN products p ON p.product_id = ii.product_id
-  JOIN product_categories pc ON pc.category_id = p.category_id
-  JOIN storage_types st ON st.storage_type_id = ii.storage_type_id
-`;
-
-/** Finds an existing product row matching (name, category), or creates one. */
-async function findOrCreateProductId(conn, name, categoryDartName) {
-  const categoryDbName = CATEGORY_DB_NAMES[categoryDartName];
-  if (!categoryDbName) throw new ApiError(400, `Unknown category: ${categoryDartName}`);
-
-  const [catRows] = await conn.query('SELECT category_id FROM product_categories WHERE category_name = ?', [categoryDbName]);
-  if (catRows.length === 0) throw new ApiError(500, `Category "${categoryDbName}" not found in product_categories.`);
+async function findOrCreateProductId(conn, name, category) {
+  const dbCategory = CATEGORY_DB_NAMES[category];
+  if (!dbCategory) throw new ApiError(400, `Unknown category: ${category}`);
+  const [catRows] = await conn.query('SELECT category_id FROM product_categories WHERE category_name = ?', [dbCategory]);
+  if (catRows.length === 0) throw new ApiError(500, `Category not seeded: ${dbCategory}`);
   const categoryId = catRows[0].category_id;
 
-  const [existing] = await conn.query(
+  const [exact] = await conn.query(
     'SELECT product_id FROM products WHERE category_id = ? AND LOWER(product_name) = LOWER(?)',
     [categoryId, name]
   );
-  if (existing.length > 0) return existing[0].product_id;
+  if (exact.length > 0) return exact[0].product_id;
 
-  const [inserted] = await conn.query(
+  const [partial] = await conn.query(
+    'SELECT product_id FROM products WHERE category_id = ? AND LOWER(product_name) LIKE LOWER(?) LIMIT 1',
+    [categoryId, `%${name}%`]
+  );
+  if (partial.length > 0) return partial[0].product_id;
+
+  const [result] = await conn.query(
     'INSERT INTO products (category_id, product_name) VALUES (?, ?)',
     [categoryId, name]
   );
-  return inserted.insertId;
+  return result.insertId;
 }
 
-async function findStorageTypeId(conn, storageDartName) {
-  const dbName = STORAGE_DB_NAMES[storageDartName];
-  if (!dbName) throw new ApiError(400, `Unknown storage location: ${storageDartName}`);
-  const [rows] = await conn.query('SELECT storage_type_id FROM storage_types WHERE storage_name = ?', [dbName]);
-  if (rows.length === 0) throw new ApiError(500, `Storage type "${dbName}" not found.`);
+async function findStorageTypeId(conn, storageLocation) {
+  const dbStorage = STORAGE_DB_NAMES[storageLocation];
+  if (!dbStorage) throw new ApiError(400, `Unknown storage location: ${storageLocation}`);
+  const [rows] = await conn.query('SELECT storage_type_id FROM storage_types WHERE storage_name = ?', [dbStorage]);
+  if (rows.length === 0) throw new ApiError(500, `Storage type not seeded: ${dbStorage}`);
   return rows[0].storage_type_id;
 }
 
@@ -114,7 +123,7 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
   }
 }));
 
-// PUT /inventory-items/:id  — edit (name/quantity/storage/category/date)
+// PUT /inventory-items/:id  — edit (name/quantity/storage/category/date/unit/notes)
 router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   await assertMemberForItem(req.userId, req.params.id);
   const { name, quantity, unit, notes, storageLocation, category, useByDate } = req.body;
@@ -151,6 +160,7 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
       updates.push('expiry_date = ?');
       params.push(useByDate);
     }
+
     if (updates.length > 0) {
       params.push(req.params.id);
       await conn.query(`UPDATE inventory_items SET ${updates.join(', ')} WHERE inventory_item_id = ?`, params);
@@ -167,14 +177,22 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   }
 }));
 
-// Valid values the client can send for the new subjective fields —
-// validated server-side so bad/unexpected values can't get stored.
+// Valid values the client can send for the subjective fields — validated
+// server-side so bad/unexpected values can't get stored.
 const VALID_DISCARD_REASONS = ['spoiled', 'expired_not_spoiled', 'quality_declined', 'other'];
 const VALID_CONSUMED_AMOUNTS = ['partial', 'half', 'full'];
 
 // POST /inventory-items/:id/resolve
 // { disposition: 'consumed'|'discarded'|'donated', discardReason?, consumedAmount? }
 // resolvedByUserId is always req.userId, never trusted from the body.
+//
+// IMPORTANT: a "consumed" disposition with consumedAmount 'partial' or
+// 'half' does NOT actually resolve the item — it stays IN_STOCK and
+// active in the inventory, just tagged with how much has been used so
+// far (e.g. an opened carton of milk). Only 'full' (or discarded/
+// donated) actually removes it from the active inventory. This can be
+// called repeatedly on the same still-active item (partial -> half ->
+// full) since the item never leaves IN_STOCK until the final call.
 router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
   await assertMemberForItem(req.userId, req.params.id);
   const { disposition, discardReason, consumedAmount } = req.body;
@@ -196,18 +214,33 @@ router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
     const item = rows[0];
     if (item.status !== 'IN_STOCK') throw new ApiError(409, 'This item has already been resolved.');
 
+    const isPartialConsumption = disposition === 'consumed' && (consumedAmount === 'partial' || consumedAmount === 'half');
+
+    if (isPartialConsumption) {
+      // Item stays IN_STOCK — just record the marker, don't resolve it.
+      await conn.query('UPDATE inventory_items SET consumed_amount = ? WHERE inventory_item_id = ?', [consumedAmount, req.params.id]);
+      await conn.query(
+        `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
+         VALUES (?, ?, 'CONSUME', ?, ?)`,
+        [req.params.id, resolvedByUserId, item.quantity, `Marked partially consumed (${consumedAmount})`]
+      );
+      await conn.commit();
+      const [updatedRows] = await conn.query(`${ITEM_SELECT} WHERE ii.inventory_item_id = ?`, [req.params.id]);
+      return res.json(itemRowToJson(updatedRows[0]));
+    }
+
     const statusMap = { consumed: 'CONSUMED', discarded: 'DISCARDED', donated: 'DONATED' };
     const newStatus = statusMap[disposition];
     await conn.query(
       'UPDATE inventory_items SET status = ?, checkout_date = NOW(), discard_reason = ?, consumed_amount = ? WHERE inventory_item_id = ?',
-      [newStatus, disposition === 'discarded' ? (discardReason || null) : null, disposition === 'consumed' ? (consumedAmount || null) : null, req.params.id]
+      [newStatus, disposition === 'discarded' ? (discardReason || null) : null, disposition === 'consumed' ? (consumedAmount || 'full') : null, req.params.id]
     );
 
     if (disposition === 'consumed') {
       await conn.query(
         `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
-         VALUES (?, ?, 'CONSUME', ?, ?)`,
-        [req.params.id, resolvedByUserId, item.quantity, consumedAmount ? `Marked consumed (${consumedAmount})` : 'Marked consumed']
+         VALUES (?, ?, 'CONSUME', ?, 'Marked fully consumed')`,
+        [req.params.id, resolvedByUserId, item.quantity]
       );
     } else if (disposition === 'discarded') {
       // Transaction-level discard_reason is a separate, auto-computed
