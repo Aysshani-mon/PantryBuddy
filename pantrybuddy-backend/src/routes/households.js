@@ -100,6 +100,30 @@ router.get('/households/:id/members', asyncHandler(async (req, res) => {
   res.json(rows.map(memberRowToJson));
 }));
 
+// POST /households/:id/leave — the authenticated user leaves this
+// household. Uses req.userId only, never trusts a body param, so you
+// can only ever remove your own membership, not someone else's.
+//
+// Deliberately does NOT block a sole admin from leaving a household
+// that still has other members — there's no "promote another member to
+// admin" feature yet, so a hard block would leave that person
+// completely stuck with no way out. The frontend warns about this
+// consequence in the confirmation dialog instead.
+router.post('/households/:id/leave', asyncHandler(async (req, res) => {
+  const [memberRows] = await pool.query(
+    "SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ? AND status = 'ACTIVE'",
+    [req.params.id, req.userId]
+  );
+  if (memberRows.length === 0) {
+    throw new ApiError(403, "You're not a member of this household.");
+  }
+  await pool.query(
+    "UPDATE team_members SET status = 'INACTIVE' WHERE team_id = ? AND user_id = ?",
+    [req.params.id, req.userId]
+  );
+  res.json({ ok: true });
+}));
+
 // POST /join-requests { inviteCode }  — AC 3.5.1 (revised). The
 // requester is always req.userId, never trusted from the request body
 // (otherwise anyone could submit a join request AS someone else).
