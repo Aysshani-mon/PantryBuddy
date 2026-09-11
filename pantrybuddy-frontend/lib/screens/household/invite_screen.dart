@@ -32,20 +32,20 @@ class InviteScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3)),
+                  border: Border.all(color: Theme.of(context).colorScheme.primary, width: 1.6),
                 ),
                 child: Column(
                   children: [
-                    Text('INVITE CODE', style: TextStyle(color: Colors.grey.shade600, fontSize: 12, letterSpacing: 1)),
+                    Text('INVITE CODE', style: TextStyle(color: Colors.grey.shade700, fontSize: 12, letterSpacing: 1)),
                     const SizedBox(height: 8),
                     Text(
                       household?.id ?? '',
-                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: 2),
+                      style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 2),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 18),
               OutlinedButton.icon(
                 onPressed: () {
                   Clipboard.setData(ClipboardData(text: household?.id ?? ''));

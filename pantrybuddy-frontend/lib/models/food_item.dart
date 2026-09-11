@@ -99,12 +99,84 @@ extension ProductCategoryLabel on ProductCategory {
 }
 
 /// What happened to an item once it left the inventory. Matches
-/// schema.sql `inventory_items.status` (IN_STOCK maps to isActive==true;
-/// this enum covers the two "resolved" states the schema supports).
-/// NOTE: a DONATED option was considered but the current schema's status
-/// enum doesn't include it — dropped for now, can be added back once the
-/// schema/DB team adds it.
-enum ItemDisposition { consumed, discarded }
+/// schema.sql `inventory_items.status` (IN_STOCK maps to isActive==true).
+enum ItemDisposition { consumed, discarded, donated }
+
+/// The user's own stated reason for discarding — distinct from the
+/// backend's separate auto-computed EXPIRED/USER_DISCARDED timing
+/// classification on the transaction row (see backend README).
+enum DiscardReason { spoiled, expiredNotSpoiled, qualityDeclined, other }
+
+extension DiscardReasonLabel on DiscardReason {
+  String get label {
+    switch (this) {
+      case DiscardReason.spoiled:
+        return 'Spoiled / unsafe to eat';
+      case DiscardReason.expiredNotSpoiled:
+        return 'Expired, but not visibly spoiled';
+      case DiscardReason.qualityDeclined:
+        return 'Quality declined';
+      case DiscardReason.other:
+        return 'Other reason';
+    }
+  }
+
+  /// The string sent to/received from the backend (see
+  /// VALID_DISCARD_REASONS in routes/inventory.js).
+  String get apiValue {
+    switch (this) {
+      case DiscardReason.spoiled:
+        return 'spoiled';
+      case DiscardReason.expiredNotSpoiled:
+        return 'expired_not_spoiled';
+      case DiscardReason.qualityDeclined:
+        return 'quality_declined';
+      case DiscardReason.other:
+        return 'other';
+    }
+  }
+
+  static DiscardReason? fromApiValue(String? value) {
+    for (final r in DiscardReason.values) {
+      if (r.apiValue == value) return r;
+    }
+    return null;
+  }
+}
+
+/// How much of a consumed item was actually used.
+enum ConsumedAmount { partial, half, full }
+
+extension ConsumedAmountLabel on ConsumedAmount {
+  String get label {
+    switch (this) {
+      case ConsumedAmount.partial:
+        return 'Partially consumed';
+      case ConsumedAmount.half:
+        return 'Half consumed';
+      case ConsumedAmount.full:
+        return 'Fully consumed';
+    }
+  }
+
+  String get apiValue {
+    switch (this) {
+      case ConsumedAmount.partial:
+        return 'partial';
+      case ConsumedAmount.half:
+        return 'half';
+      case ConsumedAmount.full:
+        return 'full';
+    }
+  }
+
+  static ConsumedAmount? fromApiValue(String? value) {
+    for (final a in ConsumedAmount.values) {
+      if (a.apiValue == value) return a;
+    }
+    return null;
+  }
+}
 
 /// A single inventory item. Matches schema.sql `inventory_items`
 /// (simplified: `name` stays free text here instead of a `product_id`
@@ -128,6 +200,10 @@ class FoodItem {
   /// bought once but used gradually. Shown on the item card and detail
   /// screen; editable any time via the Edit Item screen.
   String? notes;
+  /// Set only when [disposition] is discarded.
+  DiscardReason? discardReason;
+  /// Set only when [disposition] is consumed.
+  ConsumedAmount? consumedAmount;
 
   FoodItem({
     required this.id,
@@ -143,6 +219,8 @@ class FoodItem {
     this.disposition,
     this.resolvedAt,
     this.notes,
+    this.discardReason,
+    this.consumedAmount,
   }) : addedAt = addedAt ?? DateTime.now();
 
   bool get isActive => disposition == null;

@@ -5,6 +5,7 @@ import '../../models/household.dart';
 import '../household/invite_screen.dart';
 import '../household/activity_log_screen.dart';
 import '../household/pending_requests_screen.dart';
+import '../household/switch_household_screen.dart';
 import '../onboarding/create_profile_screen.dart';
 import 'edit_profile_screen.dart';
 
@@ -58,26 +59,30 @@ class ProfileScreen extends StatelessWidget {
                   children: [
                     CircleAvatar(
                       radius: 40,
-                      backgroundColor: Colors.grey.shade100,
+                      backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
                       child: Text(AvatarCatalog.emojiFor(user.avatarKey),
                           style: const TextStyle(fontSize: 36)),
                     ),
                     const SizedBox(height: 12),
                     Text(user.name, style: Theme.of(context).textTheme.titleLarge),
-                    Text(household?.name ?? '', style: TextStyle(color: Colors.grey.shade600)),
+                    Text(household?.name ?? '', style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 4),
-                    Text('ID: ${user.id}',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 11)),
+                    Text('User ID: ${user.id}',
+                    style: TextStyle(color: Colors.grey.shade600, fontSize: 13, fontWeight: FontWeight.w500)),    
                   ],
                 ),
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-                  builder: (_) => EditProfileScreen(appState: appState),
-                )),
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Edit profile'),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => EditProfileScreen(appState: appState),
+                  )),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit profile', style: TextStyle(fontSize: 15.5)),
+                ),
               ),
               const SizedBox(height: 28),
               Text('Household', style: Theme.of(context).textTheme.titleMedium),
@@ -85,9 +90,20 @@ class ProfileScreen extends StatelessWidget {
               Card(
                 child: Column(
                   children: [
+                    ListTile(
+                      leading: const Icon(Icons.swap_horiz),
+                      title: const Text('Switch household'),
+                      subtitle: appState.myHouseholds.length > 1
+                          ? Text('${appState.myHouseholds.length} households')
+                          : null,
+                      onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                        builder: (_) => SwitchHouseholdScreen(appState: appState),
+                      )),
+                    ),
+                    const Divider(height: 1),
                     ...appState.householdMembers.map((member) => ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Colors.grey.shade100,
+                            backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
                             child: Text(AvatarCatalog.emojiFor(member.user.avatarKey)),
                           ),
                           title: Text(member.user.name),
@@ -128,11 +144,18 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 28),
-              OutlinedButton.icon(
-                onPressed: () => _confirmSignOut(context),
-                icon: const Icon(Icons.logout, color: Colors.red),
-                label: const Text('Sign out', style: TextStyle(color: Colors.red)),
-                style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.red)),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _confirmSignOut(context),
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Sign out', style: TextStyle(fontSize: 15.5)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade600,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
               ),
             ],
           );

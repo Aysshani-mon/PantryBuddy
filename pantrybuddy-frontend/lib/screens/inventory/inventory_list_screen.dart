@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../../state/app_state.dart';
 import '../../models/food_item.dart';
 import '../../widgets/item_card.dart';
@@ -20,6 +21,7 @@ class _InventoryListScreenState extends State<InventoryListScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -29,8 +31,19 @@ class _InventoryListScreenState extends State<InventoryListScreen>
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Debounced so the list only re-filters/rebuilds ~300ms after typing
+  /// pauses, instead of on every single keystroke — typing fast in
+  /// search was a real, noticeable source of lag.
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
@@ -94,7 +107,7 @@ class _InventoryListScreenState extends State<InventoryListScreen>
   Widget _buildSearchBar() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => _onSearchChanged(),
       decoration: InputDecoration(
         hintText: 'Search your inventory...',
         prefixIcon: const Icon(Icons.search),

@@ -34,6 +34,11 @@ class AppState extends ChangeNotifier {
 
   AppUser? currentUser;
   Household? currentHousehold;
+  /// Every household [currentUser] currently belongs to — a user can be
+  /// an active member of more than one. Used for the "switch household"
+  /// list on the Profile screen; [currentHousehold] is whichever one is
+  /// active right now.
+  List<Household> myHouseholds = [];
   List<HouseholdMember> householdMembers = [];
   List<FoodItem> items = [];
   List<Reminder> reminders = [];
@@ -87,7 +92,8 @@ class AppState extends ChangeNotifier {
       currentUser = currentUser!.copyWith(householdId: household.id);
       currentHousehold = household;
       _startWatching();
-      notifyListeners();
+      notifyListeners(); // let the UI proceed immediately — don't wait on this
+      _refreshMyHouseholds().then((_) => notifyListeners());
       return;
     }
 
@@ -129,6 +135,7 @@ class AppState extends ChangeNotifier {
     await _logJoin();
     _startWatching();
     notifyListeners();
+    _refreshMyHouseholds().then((_) => notifyListeners());
   }
 
   /// AC 3.5.1 (revised) — submits a request to join; does NOT grant
@@ -136,15 +143,27 @@ class AppState extends ChangeNotifier {
   /// duplicate pending request. Live-updates [pendingMyJoinRequest] via
   /// [watchJoinRequest] so the "waiting for approval" screen updates the
   /// moment an admin approves/declines it.
-  Future<void> requestToJoinHousehold({required String inviteCode}) async {
+  /// [blockAppWhilePending] is true for the normal onboarding flow (the
+  /// user has no household yet, so the whole app should show the
+  /// waiting screen). When a user who already has an active household
+  /// requests to join an additional one, pass false — they keep using
+  /// their current household normally; the new one just isn't live-
+  /// watched, and will appear in [myHouseholds] once approved and the
+  /// list is next refreshed (e.g. on their next sign-in).
+  Future<void> requestToJoinHousehold({
+    required String inviteCode,
+    bool blockAppWhilePending = true,
+  }) async {
     if (currentUser == null) return;
     final request = await householdRepo.requestToJoin(
       inviteCode: inviteCode,
       user: currentUser!,
     );
-    pendingMyJoinRequest = request;
-    notifyListeners();
-    _watchMyJoinRequest(request);
+    if (blockAppWhilePending) {
+      pendingMyJoinRequest = request;
+      notifyListeners();
+      _watchMyJoinRequest(request);
+    }
   }
 
   /// Shared by [requestToJoinHousehold] and [signIn] (a returning user may
@@ -158,6 +177,7 @@ class AppState extends ChangeNotifier {
         currentUser = currentUser!.copyWith(householdId: updated.householdId);
         await userRepo.updateUser(currentUser!);
         _startWatching();
+        await _refreshMyHouseholds();
         pendingMyJoinRequest = null; // fully joined now — clear the pending marker
       }
       notifyListeners();
@@ -209,6 +229,73 @@ class AppState extends ChangeNotifier {
   Future<void> _refreshMembers() async {
     if (currentHousehold == null) return;
     householdMembers = await householdRepo.getMembers(currentHousehold!.id);
+  }
+
+  Future<void> _refreshMyHouseholds() async {
+    if (currentUser == null) return;
+    myHouseholds = await householdRepo.getHouseholdsForUser(currentUser!.id);
+  }
+
+  /// Switches the active household to one the user already belongs to
+  /// (see [myHouseholds]) — e.g. a family and a shared flat inventory,
+  /// switched between from the Profile screen. Does nothing if already
+  /// on that household.
+  Future<void> switchHousehold(Household household) async {
+    if (currentUser == null || currentHousehold?.id == household.id) return;
+    _itemsSub?.cancel();
+    _activitySub?.cancel();
+    currentHousehold = household;
+    currentUser = currentUser!.copyWith(householdId: household.id);
+    await userRepo.updateUser(currentUser!);
+    householdMembers = [];
+    items = [];
+    reminders = [];
+    activityLog = [];
+    pendingRequests = [];
+    notifyListeners(); // show the new household's screens as loading immediately
+    _startWatching(); // re-populates members, pending requests, items, activity, reminders
+  }
+
+  /// Leaves [householdId] — removes only the current user's own
+  /// membership. If it's the household currently being viewed, switches
+  /// to another one the user still belongs to, or back to onboarding if
+  /// none are left.
+  Future<void> leaveHousehold(String householdId) async {
+    if (currentUser == null) return;
+    await householdRepo.leaveHousehold(householdId: householdId, userId: currentUser!.id);
+    await _refreshMyHouseholds();
+
+    if (currentHousehold?.id != householdId) {
+      notifyListeners();
+      return;
+    }
+
+    // They left the household they were currently viewing.
+    _itemsSub?.cancel();
+    _activitySub?.cancel();
+    _myJoinRequestSub?.cancel();
+    if (myHouseholds.isNotEmpty) {
+      currentHousehold = myHouseholds.first;
+      currentUser = currentUser!.copyWith(householdId: currentHousehold!.id);
+      await userRepo.updateUser(currentUser!);
+      householdMembers = [];
+      items = [];
+      reminders = [];
+      activityLog = [];
+      pendingRequests = [];
+      notifyListeners();
+      _startWatching();
+    } else {
+      // No households left at all — main.dart's routing sends them back
+      // to Create/Join Household once currentHousehold is null.
+      currentHousehold = null;
+      householdMembers = [];
+      items = [];
+      reminders = [];
+      activityLog = [];
+      pendingRequests = [];
+      notifyListeners();
+    }
   }
 
   void _startWatching() {
@@ -265,6 +352,7 @@ class AppState extends ChangeNotifier {
     // item id), which left the Add Item screen stuck on its loading
     // spinner since that error was never caught either.
     final created = await inventoryRepo.addItem(draft);
+    await _refreshItemsNow(); // instant feedback instead of waiting for the next poll tick
     await activityRepo.logActivity(ActivityLogEntry(
       id: IdService.newId('log'),
       householdId: currentHousehold!.id,
@@ -290,21 +378,47 @@ class AppState extends ChangeNotifier {
   }
 
   /// Consume / discard — resolves the item out of the active inventory.
-  /// (A "donate" option was considered but dropped for now since the
-  /// schema's status enum doesn't support it yet — see food_item.dart.)
-  Future<void> resolveItem(FoodItem item, ItemDisposition disposition) async {
+  Future<void> resolveItem(
+    FoodItem item,
+    ItemDisposition disposition, {
+    DiscardReason? discardReason,
+    ConsumedAmount? consumedAmount,
+  }) async {
     if (currentUser == null || currentHousehold == null) return;
-    item.disposition = disposition;
-    item.resolvedAt = DateTime.now();
+    // A "consumed" action with a partial/half amount does NOT resolve
+    // the item — it stays active in the inventory, just tagged with how
+    // much has been used so far. Only "full" (or discard/donate)
+    // actually resolves it and removes it from the active list.
+    final isPartialConsumption = disposition == ItemDisposition.consumed &&
+        (consumedAmount == ConsumedAmount.partial || consumedAmount == ConsumedAmount.half);
+    if (!isPartialConsumption) {
+      item.disposition = disposition;
+      item.resolvedAt = DateTime.now();
+    }
+    item.discardReason = discardReason;
+    item.consumedAmount = consumedAmount;
     await inventoryRepo.updateItem(item);
-    await activityRepo.logActivity(ActivityLogEntry(
-      id: IdService.newId('log'),
-      householdId: currentHousehold!.id,
-      actingUserId: currentUser!.id,
-      actingUserName: currentUser!.name,
-      action: ActivityAction.resolved,
-      itemName: item.name,
-    ));
+    await _refreshItemsNow(); // instant feedback instead of waiting for the next poll tick
+    if (!isPartialConsumption) {
+      await activityRepo.logActivity(ActivityLogEntry(
+        id: IdService.newId('log'),
+        householdId: currentHousehold!.id,
+        actingUserId: currentUser!.id,
+        actingUserName: currentUser!.name,
+        action: ActivityAction.resolved,
+        itemName: item.name,
+      ));
+    }
+  }
+
+  /// Fetches the current item list immediately, rather than waiting for
+  /// the next background poll tick — used right after the user's own
+  /// mutations (add/resolve) so their own actions feel instant, while
+  /// the poll interval elsewhere stays relaxed for passive updates.
+  Future<void> _refreshItemsNow() async {
+    if (currentHousehold == null) return;
+    items = await inventoryRepo.getItemsForHousehold(currentHousehold!.id);
+    notifyListeners();
   }
 
   Future<void> removeItem(FoodItem item) async {
@@ -428,6 +542,7 @@ class AppState extends ChangeNotifier {
 
     currentUser = null;
     currentHousehold = null;
+    myHouseholds = [];
     householdMembers = [];
     items = [];
     reminders = [];

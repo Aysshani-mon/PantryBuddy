@@ -61,8 +61,16 @@ abstract class HouseholdRepository {
   /// The household [userId] is currently an active member of, if any —
   /// null if they don't belong to one yet. Used right after sign-in so a
   /// returning user lands back in their existing household instead of
-  /// being asked to create/join one again.
+  /// being asked to create/join one again. If a user belongs to more
+  /// than one household, this is whichever one their membership row
+  /// sorts first (most recently joined) — see [getHouseholdsForUser]
+  /// for the full list used by household switching.
   Future<Household?> getHouseholdForUser(String userId);
+
+  /// Every household [userId] is currently an active member of — used
+  /// for the "switch household" list on the Profile screen. A user can
+  /// belong to more than one household at a time.
+  Future<List<Household>> getHouseholdsForUser(String userId);
 
   /// [userId]'s own still-pending join request, if any — null otherwise.
   /// Used on sign-in so a returning user who's still waiting on approval
@@ -87,6 +95,12 @@ abstract class HouseholdRepository {
   /// [getMembers]) and sets the request's status/reviewedAt/reviewedBy.
   Future<void> approveRequest({required String requestId, required String reviewedByUserId});
   Future<void> declineRequest({required String requestId, required String reviewedByUserId});
+
+  /// Leaves a household — removes the current user's own membership
+  /// only. If they're the sole admin of a household that still has
+  /// other members, this is still allowed (there's no promote-another-
+  /// admin feature yet) — the UI warns about this before confirming.
+  Future<void> leaveHousehold({required String householdId, required String userId});
 }
 
 abstract class InventoryRepository {

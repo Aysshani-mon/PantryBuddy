@@ -98,8 +98,13 @@ class ApiDataStore
   String _dateOnly(DateTime d) => d.toIso8601String().split('T').first;
 
   /// Polls [fetch] immediately and then every [interval] — see the class
-  /// doc for why (no websockets on the backend yet).
-  Stream<T> _pollStream<T>(Future<T> Function() fetch, {Duration interval = const Duration(seconds: 4)}) async* {
+  /// doc for why (no websockets on the backend yet). 8s (rather than a
+  /// more aggressive interval) deliberately trades a little live-update
+  /// latency for meaningfully less background network/rebuild churn —
+  /// nobody needs sub-5-second sync in a household inventory app, and
+  /// the constant polling was a real contributor to the app feeling
+  /// laggy while these screens are open.
+  Stream<T> _pollStream<T>(Future<T> Function() fetch, {Duration interval = const Duration(seconds: 8)}) async* {
     while (true) {
       yield await fetch();
       await Future.delayed(interval);
@@ -156,6 +161,8 @@ class ApiDataStore
             ? null
             : ItemDisposition.values.byName(json['disposition'] as String),
         resolvedAt: json['resolvedAt'] == null ? null : DateTime.parse(json['resolvedAt'] as String),
+        discardReason: DiscardReasonLabel.fromApiValue(json['discardReason'] as String?),
+        consumedAmount: ConsumedAmountLabel.fromApiValue(json['consumedAmount'] as String?),
       );
 
   Reminder _reminderFromJson(Map<String, dynamic> json) => Reminder(
@@ -279,6 +286,12 @@ class ApiDataStore
   }
 
   @override
+  Future<List<Household>> getHouseholdsForUser(String userId) async {
+    final json = await _get('/users/$userId/households');
+    return (json as List).map((e) => _householdFromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  @override
   Future<JoinRequest?> getMyPendingRequest(String userId) async {
     final json = await _get('/users/$userId/join-requests?status=pending');
     final list = (json as List).map((e) => _joinRequestFromJson(e as Map<String, dynamic>)).toList();
@@ -315,6 +328,11 @@ class ApiDataStore
     await _post('/join-requests/$requestId/decline', {'reviewedByUserId': reviewedByUserId});
   }
 
+  @override
+  Future<void> leaveHousehold({required String householdId, required String userId}) async {
+    await _post('/households/$householdId/leave');
+  }
+
   // ==================== InventoryRepository ====================
 
   @override
@@ -334,12 +352,21 @@ class ApiDataStore
 
   @override
   Future<FoodItem> updateItem(FoodItem item) async {
-    if (item.disposition != null) {
-      // Resolving (consume/discard) goes through the dedicated endpoint
-      // so the backend can also record the inventory_transactions row.
+    // A partial/half consumedAmount doesn't set item.disposition (the
+    // item stays active — see AppState.resolveItem), but it still needs
+    // to go through /resolve so the backend logs the transaction and
+    // stores the marker without changing the item's status.
+    final isPartialConsumption = item.disposition == null &&
+        (item.consumedAmount == ConsumedAmount.partial || item.consumedAmount == ConsumedAmount.half);
+    if (item.disposition != null || isPartialConsumption) {
+      // Resolving (consume/discard/donate) goes through the dedicated
+      // endpoint so the backend can also record the inventory_transactions
+      // row.
       final json = await _post('/inventory-items/${item.id}/resolve', {
-        'disposition': item.disposition!.name,
+        'disposition': item.disposition?.name ?? 'consumed',
         'resolvedByUserId': item.addedByUserId,
+        if (item.discardReason != null) 'discardReason': item.discardReason!.apiValue,
+        if (item.consumedAmount != null) 'consumedAmount': item.consumedAmount!.apiValue,
       });
       return _itemFromJson(json as Map<String, dynamic>);
     }

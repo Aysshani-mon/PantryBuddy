@@ -4,48 +4,100 @@ import '../../models/food_item.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/date_format.dart';
 import 'add_edit_item_screen.dart';
+import 'record_discard_screen.dart';
 
-/// AC 2.6.1 plus item actions: consume / discard, edit, delete.
+/// AC 2.6.1 plus item actions: consume / discard / donate, edit.
+/// The standalone "Delete" action was removed (usability testing found
+/// no real use for it once every item must be explicitly resolved via
+/// one of these three actions instead).
 class ItemDetailScreen extends StatelessWidget {
   const ItemDetailScreen({super.key, required this.appState, required this.item});
   final AppState appState;
   final FoodItem item;
 
-  Future<void> _resolve(BuildContext context, ItemDisposition disposition) async {
+  Future<void> _resolve(
+    BuildContext context,
+    ItemDisposition disposition, {
+    DiscardReason? discardReason,
+    ConsumedAmount? consumedAmount,
+  }) async {
+    // Show immediate visual feedback the moment the action is confirmed
+    // — previously the button just sat there with no response while the
+    // network request was in flight, then the screen suddenly popped,
+    // which read as "nothing happened" from the user's side.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
     try {
-      await appState.resolveItem(item, disposition);
-      if (context.mounted) Navigator.of(context).pop();
+      await appState.resolveItem(item, disposition, discardReason: discardReason, consumedAmount: consumedAmount);
+      if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss the loading indicator
+        Navigator.of(context).pop(); // then leave the item detail screen
+      }
     } catch (e) {
       if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss the loading indicator
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t update this item: $e')));
       }
     }
   }
 
-  Future<void> _confirmDelete(BuildContext context) async {
+  Future<void> _consume(BuildContext context) async {
+    final amount = await showModalBottomSheet<ConsumedAmount>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('How much did you consume?', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text('This helps track how food actually gets used.', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              const SizedBox(height: 14),
+              ...ConsumedAmount.values.map((a) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.restaurant_outlined),
+                    title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    onTap: () => Navigator.of(context).pop(a),
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (amount != null && context.mounted) {
+      await _resolve(context, ItemDisposition.consumed, consumedAmount: amount);
+    }
+  }
+
+  Future<void> _discard(BuildContext context) async {
+    final reason = await Navigator.of(context).push<DiscardReason>(
+      MaterialPageRoute(builder: (_) => RecordDiscardScreen(item: item)),
+    );
+    if (reason != null && context.mounted) {
+      await _resolve(context, ItemDisposition.discarded, discardReason: reason);
+    }
+  }
+
+  Future<void> _donate(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remove item?'),
-        content: Text('This will remove "${item.name}" from your inventory.'),
+        title: const Text('Mark as donated?'),
+        content: Text('"${item.name}" will be recorded as donated instead of consumed or discarded.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm')),
         ],
       ),
     );
-    if (confirmed == true) {
-      try {
-        await appState.removeItem(item);
-        if (context.mounted) Navigator.of(context).pop();
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t remove this item: $e')));
-        }
-      }
+    if (confirmed == true && context.mounted) {
+      await _resolve(context, ItemDisposition.donated);
     }
   }
 
@@ -61,10 +113,6 @@ class ItemDetailScreen extends StatelessWidget {
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(
               builder: (_) => AddEditItemScreen(appState: appState, existingItem: item),
             )),
-          ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => _confirmDelete(context),
           ),
         ],
       ),
@@ -109,29 +157,80 @@ class ItemDetailScreen extends StatelessWidget {
             ],
             const SizedBox(height: 24),
             if (item.isActive) ...[
+              if (item.consumedAmount != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.restaurant_outlined, color: Colors.orange.shade700, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${item.consumedAmount!.label} \u2014 still in your inventory',
+                          style: TextStyle(color: Colors.orange.shade900, fontWeight: FontWeight.w600, fontSize: 13.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
               const Text('What happened to this item?',
                   style: TextStyle(fontWeight: FontWeight.w600)),
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _resolve(context, ItemDisposition.consumed),
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _consume(context),
                   icon: const Icon(Icons.restaurant_outlined),
-                  label: const Text('Consume'),
+                  label: const Text('Consume', style: TextStyle(fontSize: 15.5)),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _resolve(context, ItemDisposition.discarded),
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _discard(context),
                   icon: const Icon(Icons.delete_sweep_outlined),
-                  label: const Text('Discard'),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red.shade700),
+                  label: const Text('Discard', style: TextStyle(fontSize: 15.5)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade600,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _donate(context),
+                  icon: const Icon(Icons.volunteer_activism_outlined),
+                  label: const Text('Donate', style: TextStyle(fontSize: 15.5)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    foregroundColor: Colors.white,
+                  ),
                 ),
               ),
             ] else ...[
               Chip(label: Text('Marked as ${item.disposition!.name}')),
+              if (item.discardReason != null) ...[
+                const SizedBox(height: 8),
+                Text('Reason: ${item.discardReason!.label}', style: TextStyle(color: Colors.grey.shade700)),
+              ],
+              if (item.consumedAmount != null) ...[
+                const SizedBox(height: 8),
+                Text(item.consumedAmount!.label, style: TextStyle(color: Colors.grey.shade700)),
+              ],
             ],
           ],
         ),

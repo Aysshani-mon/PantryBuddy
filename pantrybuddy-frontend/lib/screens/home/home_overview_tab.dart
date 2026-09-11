@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../../state/app_state.dart';
 import '../../models/app_user.dart';
 import '../../models/food_item.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/item_card.dart';
 import '../../widgets/app_logo.dart';
 import '../inventory/expiring_soon_screen.dart';
@@ -24,6 +26,24 @@ class HomeOverviewTab extends StatefulWidget {
 
 class _HomeOverviewTabState extends State<HomeOverviewTab> {
   final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Debounced so the list only re-filters/rebuilds ~300ms after typing
+  /// pauses, instead of on every single keystroke — typing fast in
+  /// search was a real, noticeable source of lag.
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() {});
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -78,28 +98,36 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
         children: [
           const AppLogo(markSize: 150, direction: Axis.horizontal),
           const SizedBox(height: 16),
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 24,
-                backgroundColor: Colors.grey.shade100,
-                child: Text(
-                  user != null ? AvatarCatalog.emojiFor(user.avatarKey) : '🥕',
-                  style: const TextStyle(fontSize: 22),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.basilLight,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: Colors.white,
+                  child: Text(
+                    user != null ? AvatarCatalog.emojiFor(user.avatarKey) : '🥕',
+                    style: const TextStyle(fontSize: 22),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(household?.name ?? 'Your household',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
-                    Text('Hi, ${user?.name ?? ''} 👋', style: TextStyle(color: Colors.grey.shade600)),
-                  ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(household?.name ?? 'Your household',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, fontSize: 17)),
+                      Text('Hi, ${user?.name ?? ''} 👋',
+                          style: TextStyle(color: AppTheme.ink.withValues(alpha: 0.65), fontSize: 13)),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
@@ -109,7 +137,7 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
   Widget _buildSearchBar() {
     return TextField(
       controller: _searchController,
-      onChanged: (_) => setState(() {}),
+      onChanged: (_) => _onSearchChanged(),
       decoration: InputDecoration(
         hintText: 'Search your inventory...',
         prefixIcon: const Icon(Icons.search),
@@ -131,39 +159,49 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
     };
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      child: Card(
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text('${active.length}',
-                      style: const TextStyle(fontSize: 32, fontWeight: FontWeight.w800)),
-                  const SizedBox(width: 8),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Text('items in your inventory'),
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: AppTheme.heroFill(AppTheme.seedColor),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text('${active.length}',
+                    style: AppTheme.statNumberStyle.copyWith(fontSize: 40, color: Colors.white)),
+                const SizedBox(width: 8),
+                Text('items in your inventory',
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13.5)),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                for (var i = 0; i < StorageLocation.values.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        children: [
+                          Text('${byLocation[StorageLocation.values[i]]}',
+                              style: AppTheme.statNumberStyle.copyWith(fontSize: 18, color: Colors.white)),
+                          Text(StorageLocation.values[i].label,
+                              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 11.5)),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: StorageLocation.values.map((loc) {
-                  return Expanded(
-                    child: Column(
-                      children: [
-                        Text('${byLocation[loc]}',
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-                        Text(loc.label, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
     );

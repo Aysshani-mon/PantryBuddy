@@ -93,16 +93,6 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
       title: 'PantryBuddy',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
-      // Paints the app's background gradient once, behind every screen —
-      // works because ThemeData.scaffoldBackgroundColor and the AppBar
-      // background are both set to transparent, so this shows through
-      // everywhere without needing to touch each screen individually.
-      builder: (context, child) {
-        return DecoratedBox(
-          decoration: const BoxDecoration(gradient: AppTheme.appBackgroundGradient),
-          child: child,
-        );
-      },
       home: ListenableBuilder(
         listenable: _appState,
         builder: (context, _) {

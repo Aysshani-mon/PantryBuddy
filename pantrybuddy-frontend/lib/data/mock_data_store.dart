@@ -157,6 +157,18 @@ class InMemoryDataStore
   }
 
   @override
+  Future<List<Household>> getHouseholdsForUser(String userId) async {
+    final result = <Household>[];
+    for (final entry in _membersByHousehold.entries) {
+      if (entry.value.containsKey(userId)) {
+        final h = _households[entry.key];
+        if (h != null) result.add(h);
+      }
+    }
+    return result;
+  }
+
+  @override
   Future<JoinRequest?> getMyPendingRequest(String userId) async {
     final matches = _joinRequests.values
         .where((r) => r.userId == userId && r.status == JoinRequestStatus.pending)
@@ -248,6 +260,11 @@ class InMemoryDataStore
     request.reviewedAt = DateTime.now();
     request.reviewedByUserId = reviewedByUserId;
     _emitJoinRequest(requestId);
+  }
+
+  @override
+  Future<void> leaveHousehold({required String householdId, required String userId}) async {
+    _membersByHousehold[householdId]?.remove(userId);
   }
 
   // ---------------- InventoryRepository ----------------

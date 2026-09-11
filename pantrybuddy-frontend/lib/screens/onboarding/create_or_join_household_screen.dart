@@ -10,9 +10,21 @@ import 'awaiting_approval_screen.dart';
 /// as a second tab. Joining now requires admin approval (matches
 /// schema.sql's join_requests table) instead of being instant — see
 /// [AwaitingApprovalScreen].
+///
+/// [isAddingAdditionalHousehold] distinguishes the normal onboarding
+/// entry point (user has no household yet — reached as the app's root
+/// screen) from being pushed on top of an existing household (from
+/// Profile > Switch household > "Join another"). In the latter case,
+/// success returns to the household the user was already using instead
+/// of navigating away into a new Home/waiting screen.
 class CreateOrJoinHouseholdScreen extends StatefulWidget {
-  const CreateOrJoinHouseholdScreen({super.key, required this.appState});
+  const CreateOrJoinHouseholdScreen({
+    super.key,
+    required this.appState,
+    this.isAddingAdditionalHousehold = false,
+  });
   final AppState appState;
+  final bool isAddingAdditionalHousehold;
 
   @override
   State<CreateOrJoinHouseholdScreen> createState() =>
@@ -45,9 +57,16 @@ class _CreateOrJoinHouseholdScreenState
     try {
       await widget.appState.createHousehold(name: _householdNameController.text.trim());
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => HomeScreen(appState: widget.appState)),
-      );
+      if (widget.isAddingAdditionalHousehold) {
+        // currentHousehold is already switched to the new one by
+        // createHousehold() — just return to the app's root rather than
+        // pushing a second Home screen on top of this navigation stack.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => HomeScreen(appState: widget.appState)),
+        );
+      }
     } catch (e) {
       setState(() {
         _submitting = false;
@@ -65,11 +84,21 @@ class _CreateOrJoinHouseholdScreenState
     try {
       await widget.appState.requestToJoinHousehold(
         inviteCode: _inviteCodeController.text.trim(),
+        blockAppWhilePending: !widget.isAddingAdditionalHousehold,
       );
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => AwaitingApprovalScreen(appState: widget.appState)),
-      );
+      if (widget.isAddingAdditionalHousehold) {
+        // Don't send them into the blocking "awaiting approval" screen —
+        // they still have their current household to use meanwhile.
+        Navigator.of(context).popUntil((route) => route.isFirst);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Request sent — waiting for that household\'s admin to approve it.'),
+        ));
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => AwaitingApprovalScreen(appState: widget.appState)),
+        );
+      }
     } on AuthException catch (e) {
       setState(() {
         _submitting = false;

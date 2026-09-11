@@ -10,8 +10,12 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.6
-  # HTTP client for talking to the real backend API (see lib/data/api_data_store.dart).
+  # HTTP client for talking to the real backend API (see lib/data/api_data_store.dart)
+  # and for Open Food Facts barcode lookups (see lib/services/product_lookup_service.dart).
   http: ^1.2.2
+  # Barcode scanning (User Story 4.1) — CameraX/ML Kit on Android, AVFoundation/
+  # Apple Vision on iOS & macOS, ZXing on web. Works on the deployed web build.
+  mobile_scanner: ^7.2.0
 
 dev_dependencies:
   flutter_test:

@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../../state/app_state.dart';
 import '../../models/food_item.dart';
 import '../../models/shelf_life_suggestion.dart';
+import '../../models/scanned_product.dart';
 import '../../services/shelf_life_service.dart';
 import '../../services/reminder_service.dart';
 import '../../widgets/validated_text_field.dart';
 import '../../utils/date_format.dart';
 import '../../utils/unit_options.dart';
+import 'barcode_scan_screen.dart';
 
 /// AC 2.1.1 — manual entry: name, quantity, storage location, expiry date.
 /// AC 3.1.1 / AC 3.1.2 — optionally set an expiry reminder while adding.
@@ -209,6 +211,47 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
     }
   }
 
+  /// User Story 4.1 — opens the barcode scanner and, on a match, pre-fills
+  /// name/category/storage location. Everything it fills stays fully
+  /// editable and nothing is saved until the user submits the form (AC
+  /// 4.4) — this only ever sets fields, never calls addItem.
+  Future<void> _scanBarcode() async {
+    final result = await Navigator.of(context).push<ScannedProduct>(
+      MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+    );
+    if (result == null || !mounted) return;
+
+    setState(() {
+      _nameController.text = result.name;
+      if (result.category != null) {
+        _category = result.category;
+        _categoryTouched = true;
+      }
+      if (result.suggestedLocation != null) {
+        _location = result.suggestedLocation;
+        _locationTouched = true;
+        _refreshSuggestion();
+      }
+    });
+    _scheduleSuggestionFetch();
+    _maybeAutoFillDate();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Filled in from scan: ${result.name} — check the details below before saving.')),
+    );
+  }
+
+  /// User Story 4.3 — held off until the team decides whether PantryBuddy
+  /// stays web-only or also ships on mobile (Google ML Kit / on-device
+  /// TFLite classification don't run on Flutter web). Button stays visible
+  /// so the layout is ready for when this is picked back up.
+  void _scanPhotoComingSoon() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Photo recognition is coming in a future update.')),
+    );
+  }
+
   int? get _effectiveLeadTime {
     if (!_wantsReminder) return null;
     if (_useCustomLeadTime) {
@@ -236,7 +279,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
       }
       if (!ReminderService.isValidLeadTime(leadTimeDays: leadTime, useByDate: _useByDate!)) {
         setState(() => _reminderError =
-            'That lead time falls after (or on) the expiry date — pick an earlier reminder.');
+            'The reminder date cannot be later than the expiry date.');
         return;
       }
     }
@@ -302,6 +345,10 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
             key: _formKey,
             child: ListView(
               children: [
+                if (!_isEditing) ...[
+                  _buildScanButtonsRow(),
+                  const SizedBox(height: 20),
+                ],
                 ValidatedTextField(
                   label: 'Item name',
                   controller: _nameController,
@@ -391,6 +438,31 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// AC 4.1 / 4.3 — two separate entry points, side by side, per the
+  /// team's design decision. Photo stays visible but routes to a "coming
+  /// soon" message rather than disappearing (see [_scanPhotoComingSoon]).
+  Widget _buildScanButtonsRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _scanBarcode,
+            icon: const Icon(Icons.qr_code_scanner, size: 19),
+            label: const Text('Scan barcode'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _scanPhotoComingSoon,
+            icon: const Icon(Icons.camera_alt_outlined, size: 19),
+            label: const Text('Scan photo'),
+          ),
+        ),
+      ],
     );
   }
 

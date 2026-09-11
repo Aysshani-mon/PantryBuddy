@@ -68,13 +68,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   }),
                 ),
                 const SizedBox(height: 28),
-                ElevatedButton(
-                  onPressed: _submitting ? null : _submit,
-                  child: _submitting
-                      ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Text('Save changes'),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: _submitting ? null : _submit,
+                    child: _submitting
+                        ? const SizedBox(
+                            height: 20, width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Save changes', style: TextStyle(fontSize: 15.5)),
+                  ),
                 ),
               ],
             ),
