@@ -60,20 +60,20 @@ All production foreign keys use `reference_id`.
 The two unit fields can remain separate because they have different purposes:
 
 - `inventory_items.unit VARCHAR(20)` stores user-facing values such as `kg`, `g`, `L`, `ml`, `pcs` and `dozen`.
-- `price_item_reference.base_unit` stores the normalized price-comparison dimension: `KG`, `L` or `PIECE`.
+- `price_item_reference.base_unit` stores the normalized price-comparison unit using the same spelling as the current inventory schema: `kg`, `L` or `pcs`.
 
 The backend conversion map is:
 
 | Inventory unit | Price base unit | Factor |
 |---|---|---:|
-| kg | KG | 1 |
-| g | KG | 0.001 |
+| kg | kg | 1 |
+| g | kg | 0.001 |
 | L | L | 1 |
 | ml | L | 0.001 |
-| pcs | PIECE | 1 |
-| dozen | PIECE | 12 |
+| pcs | pcs | 1 |
+| dozen | pcs | 12 |
 
-Do not convert between dimensions, such as PIECE to KG, without product-specific evidence. `base_unit` may use `VARCHAR(20)` to avoid introducing an incompatible second ENUM.
+Do not convert between dimensions, such as `pcs` to `kg`, without product-specific evidence. Use `base_unit VARCHAR(20)` with allowed values `kg`, `L` and `pcs`, matching the style of the existing `inventory_items.unit VARCHAR(20)` field.
 
 ### 4. Identifier relationship
 
