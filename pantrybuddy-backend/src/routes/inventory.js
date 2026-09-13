@@ -8,11 +8,14 @@ const { ApiError, asyncHandler } = require('../util/errors');
 const router = express.Router();
 
 const ITEM_SELECT = `
-  SELECT ii.*, p.product_name, pc.category_name, st.storage_name
+  SELECT ii.*, p.product_name, pc.category_name, st.storage_name,
+         pir.median_package_price AS public_estimated_price
   FROM inventory_items ii
   JOIN products p ON p.product_id = ii.product_id
   JOIN product_categories pc ON pc.category_id = p.category_id
   JOIN storage_types st ON st.storage_type_id = ii.storage_type_id
+  LEFT JOIN product_reference pr ON pr.product_id = ii.product_id
+  LEFT JOIN price_item_reference pir ON pir.reference_id = pr.reference_id
 `;
 
 function itemRowToJson(row) {
@@ -24,6 +27,15 @@ function itemRowToJson(row) {
     quantity: Number(row.quantity),
     unit: row.unit || 'pcs',
     notes: row.notes,
+    // User-entered purchase price (optional) — what they actually paid,
+    // not a per-unit figure. Null until they type one in.
+    price: row.price !== null && row.price !== undefined ? Number(row.price) : null,
+    // Public fallback estimate from PriceCatcher data, when this product
+    // has a mapped reference — used by the frontend only when the user
+    // hasn't entered their own price (see price README's priority order).
+    publicEstimatedPrice: row.public_estimated_price !== null && row.public_estimated_price !== undefined
+      ? Number(row.public_estimated_price)
+      : null,
     storageLocation: STORAGE_DART_NAMES[row.storage_name] ?? 'pantry',
     category: CATEGORY_DART_NAMES[row.category_name] ?? 'shelfStableFoods',
     useByDate: row.expiry_date,
@@ -82,13 +94,18 @@ router.get('/households/:householdId/inventory-items', asyncHandler(async (req, 
 }));
 
 // POST /households/:householdId/inventory-items
-// { name, quantity, unit, notes, storageLocation, category, useByDate }
+// { name, quantity, unit, notes, price, storageLocation, category, useByDate }
 // addedByUserId is always req.userId, never trusted from the body.
 router.post('/households/:householdId/inventory-items', asyncHandler(async (req, res) => {
   await assertMember(req.userId, req.params.householdId);
   const { name, quantity, storageLocation, category, useByDate } = req.body;
   const unit = req.body.unit || 'pcs';
   const notes = req.body.notes || null;
+  // Optional — what the user actually paid, not a per-unit figure.
+  const price = req.body.price !== undefined && req.body.price !== null ? Number(req.body.price) : null;
+  if (price !== null && (!Number.isFinite(price) || price < 0)) {
+    throw new ApiError(400, 'price must be a non-negative number.');
+  }
   if (!name || !quantity || !storageLocation || !category || !useByDate) {
     throw new ApiError(400, 'name, quantity, storageLocation, category, useByDate are required.');
   }
@@ -102,9 +119,9 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
 
     const [result] = await conn.query(
       `INSERT INTO inventory_items
-        (team_id, product_id, storage_type_id, created_by, quantity, unit, notes, purchase_date, expiry_date, expiry_date_source, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, 'USER_INPUT', 'IN_STOCK')`,
-      [req.params.householdId, productId, storageTypeId, addedByUserId, quantity, unit, notes, useByDate]
+        (team_id, product_id, storage_type_id, created_by, quantity, unit, notes, price, purchase_date, expiry_date, expiry_date_source, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURDATE(), ?, 'USER_INPUT', 'IN_STOCK')`,
+      [req.params.householdId, productId, storageTypeId, addedByUserId, quantity, unit, notes, price, useByDate]
     );
     await conn.query(
       `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
@@ -123,10 +140,10 @@ router.post('/households/:householdId/inventory-items', asyncHandler(async (req,
   }
 }));
 
-// PUT /inventory-items/:id  — edit (name/quantity/storage/category/date/unit/notes)
+// PUT /inventory-items/:id  — edit (name/quantity/storage/category/date/unit/notes/price)
 router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
   await assertMemberForItem(req.userId, req.params.id);
-  const { name, quantity, unit, notes, storageLocation, category, useByDate } = req.body;
+  const { name, quantity, unit, notes, price, storageLocation, category, useByDate } = req.body;
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
@@ -155,6 +172,14 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
     if (notes !== undefined) {
       updates.push('notes = ?');
       params.push(notes || null);
+    }
+    if (price !== undefined) {
+      const numericPrice = price === null ? null : Number(price);
+      if (numericPrice !== null && (!Number.isFinite(numericPrice) || numericPrice < 0)) {
+        throw new ApiError(400, 'price must be a non-negative number.');
+      }
+      updates.push('price = ?');
+      params.push(numericPrice);
     }
     if (useByDate !== undefined) {
       updates.push('expiry_date = ?');
