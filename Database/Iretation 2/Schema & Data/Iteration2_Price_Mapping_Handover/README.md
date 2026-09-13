@@ -1,150 +1,234 @@
-# PantryBuddy Iteration 2 Price Mapping Handover
+# PantryBuddy Iteration 2 Price Data — Database Handover
 
-## What is included
+## Read this first
 
-This handover contains one prepared data file:
+This handover has been aligned with Hank's current Iteration 2 `schema.sql`, `insert_static_data.sql` and database README.
 
-- `pantrybuddy_price_mapping_data.csv`
+The current schema has 14 tables. It already contains `product_reference`, but it does not contain `product_keyword_mapping` or either price table.
 
-It contains all 284 PriceCatcher items that have price observations in the supplied September 2026 data. Every item has been mapped to one of the fixed PantryBuddy category IDs.
+## Final database scope
 
-The original `food_price.csv` remains the source of the 561,441 dated, premise-level price observations and is not duplicated in this folder.
+Three new tables are required for the complete recognition and price design:
 
-## Data source
+15. `product_keyword_mapping` — recognition keywords;
+16. `price_item_reference` — link between PriceCatcher items, units and PantryBuddy references;
+17. `price_observations` — dated premise-level price observations.
 
-- Malaysia PriceCatcher item lookup: https://storage.data.gov.my/pricecatcher/lookup_item.csv
-- September 2026 prices: https://storage.data.gov.my/pricecatcher/pricecatcher_2026-09.csv
+Final total: 17 tables. Do not create a second `product_reference` table.
+
+## Supplied files and destinations
+
+| File | Use | Database destination |
+|---|---|---|
+| `product_reference_additions.csv` | New PriceCatcher-derived canonical references | Upsert into the existing `product_reference` |
+| `product_keyword_mapping_additions.csv` | Exact English PriceCatcher names for matching | Upsert into the new `product_keyword_mapping` |
+| `price_item_mapping.csv` | All 284 priced items, units, reference keys and price summaries | Populate the new `price_item_reference` |
+| `price_observations_sample_2000.csv` | Iteration 2 structural and query test sample | Populate the new `price_observations` |
+
+The complete `food_price.csv` contains 561,441 observations. It is retained in the shared data archive and is not imported into the free cloud database during Iteration 2.
+
+## Confirmed answers to the database review
+
+### 1. Observation sample
+
+Importing only 2,000 observations is acceptable for Iteration 2 because of the free cloud database limit.
+
+`price_observations_sample_2000.csv` contains:
+
+- exactly 2,000 observations;
+- at least one observation for each of the 284 priced `item_code` values;
+- additional observations selected with fixed random seed `5120`;
+- no duplicate `(date, premise_code, item_code)` keys;
+- no non-positive prices.
+
+All 284 rows in `price_item_mapping.csv` should still be loaded because these rows contain the calculated reference prices used by the application.
+
+### 2. `reference_key`
+
+`reference_key` is a staging field only. It does not enter a production table.
+
+During import, resolve:
+
+```text
+reference_key -> product_reference.reference_id
+```
+
+All production foreign keys use `reference_id`.
+
+### 3. Price and inventory units
+
+The two unit fields can remain separate because they have different purposes:
+
+- `inventory_items.unit VARCHAR(20)` stores user-facing values such as `kg`, `g`, `L`, `ml`, `pcs` and `dozen`.
+- `price_item_reference.base_unit` stores the normalized price-comparison dimension: `KG`, `L` or `PIECE`.
+
+The backend conversion map is:
+
+| Inventory unit | Price base unit | Factor |
+|---|---|---:|
+| kg | KG | 1 |
+| g | KG | 0.001 |
+| L | L | 1 |
+| ml | L | 0.001 |
+| pcs | PIECE | 1 |
+| dozen | PIECE | 12 |
+
+Do not convert between dimensions, such as PIECE to KG, without product-specific evidence. `base_unit` may use `VARCHAR(20)` to avoid introducing an incompatible second ENUM.
+
+### 4. Identifier relationship
+
+`item_code`, `reference_id` and `product_id` are different identifiers:
+
+```text
+PriceCatcher item_code
+        |
+        v
+price_item_reference.item_code
+        |
+        | reference_id (FK)
+        v
+product_reference.reference_id
+        |
+        | product_id (nullable FK)
+        v
+products.product_id
+```
+
+- `item_code` identifies one PriceCatcher-listed item and unit.
+- `reference_id` identifies a PantryBuddy recognition reference.
+- `product_id` identifies one of the PantryBuddy catalogue products.
+
+A price item may link to a reference whose `product_id` is NULL. It can support recognition, category selection and reference pricing, but it must not automatically receive a product-level shelf-life rule.
+
+### 5. One `product_reference` table
+
+The existing `product_reference` table is created once.
+
+- The earlier classification `product_reference.csv` is upserted into it.
+- `product_reference_additions.csv` is then upserted into the same table after duplicate checking.
+
+The keyword files do not go into `product_reference`:
+
+- earlier `product_keyword_mapping.csv`;
+- current `product_keyword_mapping_additions.csv`.
+
+Both keyword files are upserted into the single new `product_keyword_mapping` table.
+
+## Complete relationship
+
+```text
+product_categories
+     |                    |
+     v                    v
+products            product_reference
+     |                    |             |
+     |                    v             v
+     |        product_keyword_mapping  price_item_reference
+     |                                      |
+     v                                      v
+inventory_items                       price_observations
+```
+
+Foreign-key detail:
+
+```text
+products.category_id -> product_categories.category_id
+product_reference.category_id -> product_categories.category_id
+product_reference.product_id -> products.product_id (nullable)
+product_keyword_mapping.reference_id -> product_reference.reference_id
+price_item_reference.reference_id -> product_reference.reference_id
+price_observations.item_code -> price_item_reference.item_code
+inventory_items.product_id -> products.product_id
+```
+
+## Minimum new table fields
+
+Hank retains ownership of final SQL naming and constraint style.
+
+### `product_keyword_mapping`
+
+```text
+mapping_id
+reference_id
+keyword
+normalized_keyword
+match_type
+source_name
+source_url
+source_locator
+is_active
+created_at
+updated_at
+```
+
+### `price_item_reference`
+
+```text
+item_code INT UNSIGNED PRIMARY KEY
+reference_id BIGINT UNSIGNED FK -> product_reference.reference_id
+source_item_name VARCHAR(255)
+source_unit VARCHAR(50)
+package_quantity_in_base_unit DECIMAL(12,4)
+base_unit VARCHAR(20)
+median_package_price DECIMAL(10,2)
+mean_package_price DECIMAL(10,2)
+latest_day_median_price DECIMAL(10,2)
+median_price_per_base_unit DECIMAL(12,4)
+price_observation_count INT UNSIGNED
+latest_observation_date DATE
+source_url VARCHAR(1000)
+```
+
+Review-only columns in `price_item_mapping.csv`, such as the source category and mapping note, may remain in staging instead of being duplicated in production.
+
+### `price_observations`
+
+```text
+observation_id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY
+observation_date DATE
+premise_code INT UNSIGNED
+item_code INT UNSIGNED FK -> price_item_reference.item_code
+price_myr DECIMAL(10,2)
+UNIQUE (observation_date, premise_code, item_code)
+CHECK (price_myr > 0)
+```
+
+## Import order
+
+1. Run Hank's current 14-table schema and static-data process.
+2. Upsert the earlier classification `product_reference.csv` into the existing `product_reference`.
+3. Upsert `product_reference_additions.csv` into the same table.
+4. Resolve `reference_key` to `reference_id` using `(category_id, product_name)`.
+5. Create `product_keyword_mapping` once.
+6. Upsert the earlier `product_keyword_mapping.csv` and then `product_keyword_mapping_additions.csv`.
+7. Create `price_item_reference` and load all 284 item mappings after resolving `reference_id`.
+8. Create `price_observations` and load `price_observations_sample_2000.csv`.
+9. Validate counts, foreign keys, unique keys, positive prices and fixed category IDs.
+
+## Price use
+
+1. Use the user's actual purchase price when available.
+2. Otherwise use `median_package_price` when the item and package unit match.
+3. Use `median_price_per_base_unit` only after converting a compatible inventory unit.
+4. If no compatible public price exists, ask the user to enter a price.
+
+The median is the recommended public fallback because it is less affected by unusually high or low premise prices. The mean is retained for comparison.
+
+## Source
+
+- Item lookup: https://storage.data.gov.my/pricecatcher/lookup_item.csv
+- September 2026 observations: https://storage.data.gov.my/pricecatcher/pricecatcher_2026-09.csv
 - Official catalogue: https://open.dosm.gov.my/data-catalogue/pricecatcher
 - Licence: CC BY 4.0
 - Currency: MYR
 
-## How to use the CSV
+## Validation summary
 
-The CSV is one master staging file. It does not represent one database table. Hank can use its columns to update the existing recognition tables and populate the new price tables.
-
-### Step 1: update the existing `product_reference` table
-
-Group the CSV by `reference_key`. For rows marked `NEW_REFERENCE_REQUIRED`, insert one product reference per unique `reference_key` using:
-
-- `pantrybuddy_category_id` -> `category_id`
-- `canonical_product_name` -> `product_name`
-- `reference_key` -> temporary import key used to retrieve the generated `reference_id`
-
-Do not insert a second reference for rows marked `EXISTING_REFERENCE`.
-
-Several PriceCatcher item codes may share one product reference because they represent different package sizes of the same product.
-
-### Step 2: update the existing `product_keyword_mapping` table
-
-Use each distinct combination of `reference_key` and `source_item_name`:
-
-- `source_item_name` -> `keyword`
-- lowercase letters/numbers with punctuation replaced by spaces -> `normalized_keyword`
-- resolve `reference_key` to `product_reference.reference_id`
-- source name -> `Malaysia PriceCatcher Item Lookup`
-- source URL -> value in `lookup_source_url`
-- source locator -> `item_code=<item_code>`
-
-Check the unique key before insertion and skip an identical keyword that already exists for the same reference.
-
-### Step 3: create and populate `price_item_reference`
-
-Create one row for every `item_code`. This table connects a PriceCatcher item and package unit to PantryBuddy:
-
-```sql
-CREATE TABLE price_item_reference (
-    item_code INT UNSIGNED PRIMARY KEY,
-    reference_id BIGINT UNSIGNED NOT NULL,
-    source_item_name VARCHAR(255) NOT NULL,
-    source_unit VARCHAR(50) NOT NULL,
-    source_item_group VARCHAR(100) NULL,
-    source_item_category VARCHAR(100) NULL,
-    package_quantity_in_base_unit DECIMAL(12,4) NULL,
-    base_unit ENUM('KG', 'L', 'PIECE', 'UNSUPPORTED') NOT NULL,
-    median_package_price DECIMAL(10,2) NULL,
-    mean_package_price DECIMAL(10,2) NULL,
-    minimum_package_price DECIMAL(10,2) NULL,
-    maximum_package_price DECIMAL(10,2) NULL,
-    latest_day_median_price DECIMAL(10,2) NULL,
-    median_price_per_base_unit DECIMAL(12,4) NULL,
-    price_observation_count INT UNSIGNED NOT NULL,
-    latest_observation_date DATE NULL,
-    source_url VARCHAR(500) NOT NULL,
-    CONSTRAINT fk_price_item_reference_product
-        FOREIGN KEY (reference_id)
-        REFERENCES product_reference(reference_id)
-        ON DELETE RESTRICT
-);
-```
-
-Populate it using the matching columns in `pantrybuddy_price_mapping_data.csv`. Resolve `reference_key` to the generated or existing `reference_id` first.
-
-### Step 4: create and populate `price_observations`
-
-Use the original `food_price.csv`:
-
-```sql
-CREATE TABLE price_observations (
-    observation_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    observation_date DATE NOT NULL,
-    premise_code INT UNSIGNED NOT NULL,
-    item_code INT UNSIGNED NOT NULL,
-    price_myr DECIMAL(10,2) NOT NULL,
-    PRIMARY KEY (observation_id),
-    UNIQUE KEY uq_price_observation
-        (observation_date, premise_code, item_code),
-    KEY idx_price_item_date (item_code, observation_date),
-    CONSTRAINT fk_price_observation_item
-        FOREIGN KEY (item_code)
-        REFERENCES price_item_reference(item_code)
-        ON DELETE RESTRICT,
-    CONSTRAINT chk_price_positive CHECK (price_myr > 0)
-);
-```
-
-Import field mapping:
-
-- `date` -> `observation_date`
-- `premise_code` -> `premise_code`
-- `item_code` -> `item_code`
-- `price` -> `price_myr`
-
-## Database relationship
-
-```text
-product_categories
-        |
-product_reference
-        |-------------------------------|
-product_keyword_mapping       price_item_reference
-                                      |
-                              price_observations
-```
-
-The first two tables already exist. Only `price_item_reference` and `price_observations` are new.
-
-## Price selection
-
-Recommended backend order:
-
-1. Use the user's actual purchase price when provided.
-2. Otherwise use `median_package_price` when the item and package unit match.
-3. Use `median_price_per_base_unit` only when the user's quantity uses the same compatible base unit.
-4. If no compatible public price exists, ask the user to enter a price.
-
-Both median and mean are supplied. The median is recommended because it is less affected by unusually high or low premise prices.
-
-## Fixed category rule
-
-Keep all existing PantryBuddy category IDs unchanged. IDs 9 and 10 do not exist. The 284 current priced items naturally cover 12 of the 16 PantryBuddy categories. They do not include priced items for Snacks, Frozen Food, Vegetarian Proteins or Deli & Prepared Foods.
-
-## Validation
-
-- Mapped priced items: 284 of 284
+- Priced items mapped: 284/284
+- Price summary rows to load: 284
+- Observation sample rows: 2,000
+- Item codes represented in sample: 284
 - Invalid category IDs: 0
-- Duplicate item codes: 0
-- Blank source URLs: 0
-- Unconvertible units: 0
-- Original price observations: 561,441
-- Duplicate `(date, premise_code, item_code)` records: 0
-
+- Duplicate sample observation keys: 0
+- Non-positive sample prices: 0
+- Blank generated source URLs: 0
