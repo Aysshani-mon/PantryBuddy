@@ -6,6 +6,7 @@ This document describes the dependencies and integration requirements for the It
 
 - `README.md` — integration choices, dependencies and required behaviour.
 - `LOCAL_VALIDATION.md` — what was deployed and tested locally before handover.
+- `BACKUP_PLANS.md` — prioritised alternatives when the primary SigLIP service cannot be hosted for six months.
 - `reference_recognition_service.py` — tested reference implementation that exposes SigLIP and Tesseract through private HTTP endpoints; adapt it rather than treating it as completed PantryBuddy backend code.
 - `requirements-service.txt` — dependencies used by the reference recognition service.
 - `verify_recognition_stack.py` — optional standalone checks that the backend developer can rerun; this is not application backend code.
