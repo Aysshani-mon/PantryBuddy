@@ -12,7 +12,14 @@
 --
 -- Content      : small development seed data for the operational tables
 --                only. The catalogue tables are NOT inserted again here,
---                because insert_static_data.sql already provides them.
+--                because insert_static_data.sql already provides them:
+--                200 products, 612 shelf_life_rules, 7881
+--                product_reference rows, 24460 product_keyword_mapping
+--                rows, 284 price_item_reference rows and 2000
+--                price_observations rows.
+--                This file adds only a handful of extra rows on top of
+--                that static data, using identifiers above the static
+--                range so that nothing collides.
 -- ============================================================
 
 USE `Real_ProjectV2.0_TM06`;
@@ -66,61 +73,106 @@ INSERT INTO security_questions (question_id, user_id, question, answer_hash) VAL
 
 -- ------------------------------------------------------------
 -- product_reference
--- Rows 1-4 are linked to the static products catalogue through
--- product_id. Rows 5-6 are user-added references with product_id NULL,
--- which is allowed because NULL values are not compared by the
--- UNIQUE(product_id) key.
+-- insert_static_data.sql already loads 7881 product_reference rows with
+-- explicit reference_id values 1-7881, so this development seed only adds
+-- two extra user-created references above that range:
+--   * 7882 is an active reference with product_id NULL (a user-added
+--     reference that is not linked to the products catalogue yet).
+--   * 7883 is an inactive reference with product_id NULL.
+-- Multiple NULL product_id values are allowed because NULL values are not
+-- compared by the UNIQUE(product_id) key.
 -- ------------------------------------------------------------
 INSERT INTO product_reference (reference_id, product_id, category_id, product_name, barcode, description, is_active) VALUES
-  (1, 1,    5,  'Starfruit',            NULL,             'Reference row linked to the products catalogue.',            TRUE),
-  (2, 2,    5,  'Papaya',               NULL,             'Reference row linked to the products catalogue.',            TRUE),
-  (3, 12,   5,  'Mango',                '9556000000018',  'Linked reference row with its own scanned barcode.',         TRUE),
-  (4, 101,  4,  'Water Spinach',        NULL,             'Reference row linked to the products catalogue.',            TRUE),
-  (5, NULL, 13, 'Homemade Chili Paste', NULL,             'User-added reference, not linked to the catalogue yet.',     TRUE),
-  (6, NULL, 15, 'Dried Anchovy Snack',  '9556000000025',  'User-added reference that is currently disabled.',           FALSE);
+  (7882, NULL, 13, 'Homemade Chili Paste (seed)', NULL, 'Seed reference: user added, not linked to the catalogue yet.', TRUE),
+  (7883, NULL, 15, 'Dried Anchovy Snack (seed)',  NULL, 'Seed reference: user added and currently disabled.',            FALSE);
+
+-- ------------------------------------------------------------
+-- product_keyword_mapping
+-- A few development keywords on top of the 24460 static rows. References
+-- 7882 and 7883 come from the seed rows above; reference 1 is the first
+-- static catalogue reference (Starfruit). The normalized keywords are
+-- unique per (reference_id, match_type), so they do not clash with the
+-- static import.
+-- ------------------------------------------------------------
+INSERT INTO product_keyword_mapping
+  (reference_id, keyword, normalized_keyword, match_type, source_name, source_url, source_locator, is_active)
+VALUES
+  (1,    'Seed Sample Starfruit Label', 'seed sample starfruit label', 'TEXT', 'PantryBuddy seed data',
+   'https://example.com/pantrybuddy/seed/starfruit', 'seed/starfruit/text', TRUE),
+  (7882, 'Seed Sample Chili Paste Jar', 'seed sample chili paste jar', 'TEXT', 'PantryBuddy seed data',
+   'https://example.com/pantrybuddy/seed/chili-paste', 'seed/chili-paste/text', TRUE),
+  (7883, 'Seed Sample Anchovy Pack',    'seed sample anchovy pack',    'TEXT', 'PantryBuddy seed data',
+   'https://example.com/pantrybuddy/seed/anchovy', 'seed/anchovy/text', FALSE);
+
+-- ------------------------------------------------------------
+-- price_item_reference
+-- Two development priced items on top of the 284 static rows. item_code
+-- 900001 links to seed reference 7882; item_code 900002 links to static
+-- reference 1 (Starfruit) so that a static reference is covered too.
+-- base_unit uses the same spelling as inventory_items.unit: kg, L or pcs.
+-- ------------------------------------------------------------
+INSERT INTO price_item_reference
+  (item_code, reference_id, source_item_name, source_unit, package_quantity_in_base_unit,
+   base_unit, median_package_price, mean_package_price, latest_day_median_price,
+   median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
+VALUES
+  (900001, 7882, 'SEED CHILI PASTE JAR 250G', '250 g', 250.0000, 'kg',
+   12.50, 12.80, 12.50, 50.0000, 3, '2026-09-03', 'https://example.com/pantrybuddy/seed/prices'),
+  (900002, 1,    'SEED STARFRUIT 1KG',        '1kg',   1.0000,   'kg',
+   8.90,  9.10,  8.90,  8.9000,  2, '2026-09-03', 'https://example.com/pantrybuddy/seed/prices');
+
+-- ------------------------------------------------------------
+-- price_observations
+-- Three development observations for seed item_code 900001. The unique
+-- key is (observation_date, premise_code, item_code).
+-- ------------------------------------------------------------
+INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr) VALUES
+  ('2026-09-01', 9001, 900001, 12.50),
+  ('2026-09-02', 9001, 900001, 12.90),
+  ('2026-09-03', 9002, 900001, 11.90);
 
 -- ------------------------------------------------------------
 -- inventory_items
 -- Covers IN_STOCK, EXPIRED, CONSUMED, DONATED and DISCARDED, plus
--- unit, notes, discard_reason and consumed_amount.
+-- unit, notes, price, discard_reason and consumed_amount.
 -- storage_type_id : 1 = FRIDGE, 2 = FREEZER, 3 = PANTRY
 -- ------------------------------------------------------------
 INSERT INTO inventory_items
   (inventory_item_id, team_id, product_id, storage_type_id, created_by, quantity,
-   unit, notes, production_date, purchase_date, entry_date, shelf_life_days,
+   unit, notes, price, production_date, purchase_date, entry_date, shelf_life_days,
    expiry_date, expiry_date_source, checkout_date, status, discard_reason,
    consumed_amount)
 VALUES
-  (1, 1, 1,  1, 1, 5.00, 'pcs', 'Bought at the night market', NULL,
+  (1, 1, 1,  1, 1, 5.00, 'pcs', 'Bought at the night market', 12.50, NULL,
    DATE_SUB(CURDATE(), INTERVAL 2 DAY), DATE_SUB(NOW(), INTERVAL 2 DAY), 7,
    DATE_ADD(CURDATE(), INTERVAL 5 DAY), 'PACKAGING', NULL, 'IN_STOCK', NULL, NULL),
-  (2, 1, 12, 1, 1, 3.00, 'pcs', 'Ripening on the counter',
+  (2, 1, 12, 1, 1, 3.00, 'pcs', 'Ripening on the counter', 8.90,
    DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(CURDATE(), INTERVAL 1 DAY),
    DATE_SUB(NOW(), INTERVAL 1 DAY), 5, DATE_ADD(CURDATE(), INTERVAL 4 DAY),
    'CALCULATED', NULL, 'IN_STOCK', NULL, NULL),
-  (3, 1, 60, 1, 2, 0.50, 'kg', 'For sambal',
+  (3, 1, 60, 1, 2, 0.50, 'kg', 'For sambal', 21.00,
    DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(CURDATE(), INTERVAL 1 DAY),
    DATE_SUB(NOW(), INTERVAL 1 DAY), 2, DATE_ADD(CURDATE(), INTERVAL 1 DAY),
    'CALCULATED', NULL, 'IN_STOCK', NULL, NULL),
-  (4, 1, 101, 1, 1, 1.00, 'kg', NULL, NULL,
+  (4, 1, 101, 1, 1, 1.00, 'kg', NULL, NULL, NULL,
    DATE_SUB(CURDATE(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY), NULL,
    DATE_ADD(CURDATE(), INTERVAL 2 DAY), 'USER_INPUT', NULL, 'IN_STOCK', NULL, NULL),
-  (5, 2, 175, 2, 3, 1.00, 'kg', 'Freezer batch 2', NULL,
+  (5, 2, 175, 2, 3, 1.00, 'kg', 'Freezer batch 2', 34.90, NULL,
    DATE_SUB(CURDATE(), INTERVAL 10 DAY), DATE_SUB(NOW(), INTERVAL 10 DAY), 90,
    DATE_ADD(CURDATE(), INTERVAL 60 DAY), 'PACKAGING', NULL, 'IN_STOCK', NULL, NULL),
-  (6, 2, 2,  3, 3, 2.00, 'pcs', NULL, NULL,
+  (6, 2, 2,  3, 3, 2.00, 'pcs', NULL, NULL, NULL,
    DATE_SUB(CURDATE(), INTERVAL 6 DAY), DATE_SUB(NOW(), INTERVAL 6 DAY), NULL,
    DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'USER_INPUT', DATE_SUB(NOW(), INTERVAL 1 DAY),
    'EXPIRED', 'EXPIRED', NULL),
-  (7, 2, 150, 1, 3, 1.00, 'kg', 'Used for soup',
+  (7, 2, 150, 1, 3, 1.00, 'kg', 'Used for soup', 6.75,
    DATE_SUB(CURDATE(), INTERVAL 3 DAY), DATE_SUB(CURDATE(), INTERVAL 3 DAY),
    DATE_SUB(NOW(), INTERVAL 3 DAY), 7, DATE_ADD(CURDATE(), INTERVAL 4 DAY),
    'CALCULATED', DATE_SUB(NOW(), INTERVAL 2 DAY), 'CONSUMED', NULL, '1.00'),
-  (8, 1, 199, 1, 1, 0.80, 'kg', 'Shared with the neighbours', NULL,
+  (8, 1, 199, 1, 1, 0.80, 'kg', 'Shared with the neighbours', 24.90, NULL,
    DATE_SUB(CURDATE(), INTERVAL 4 DAY), DATE_SUB(NOW(), INTERVAL 4 DAY), 3,
    DATE_ADD(CURDATE(), INTERVAL 1 DAY), 'PACKAGING', DATE_SUB(NOW(), INTERVAL 1 DAY),
    'DONATED', 'DONATED', NULL),
-  (9, 1, 4,  3, 2, 1.00, 'pcs', 'Overripe', NULL,
+  (9, 1, 4,  3, 2, 1.00, 'pcs', 'Overripe', NULL, NULL,
    DATE_SUB(CURDATE(), INTERVAL 5 DAY), DATE_SUB(NOW(), INTERVAL 5 DAY), NULL,
    DATE_SUB(CURDATE(), INTERVAL 3 DAY), 'USER_INPUT', DATE_SUB(NOW(), INTERVAL 3 DAY),
    'DISCARDED', 'USER_DISCARDED', NULL);

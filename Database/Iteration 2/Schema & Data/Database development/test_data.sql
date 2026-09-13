@@ -16,7 +16,7 @@
 --     is repeatable and leaves no test data behind.
 --   * Consume, discard and donate operations lock the target row with
 --     SELECT ... FOR UPDATE to simulate concurrent-safe stock updates.
---   * Scenario 22 is the only block without a transaction because DDL
+--   * Scenario 29 is the only block without a transaction because DDL
 --     statements cause implicit commits in MySQL.
 -- ============================================================
 
@@ -132,20 +132,24 @@ ROLLBACK;
 
 -- ============================================================
 -- SCENARIO 7: product_reference can link to a catalogue product
--- product_id 200 (Beef Knuckle) is not referenced by the seed data.
+-- The static import links every one of the 200 catalogue products, so this
+-- scenario verifies the existing links instead of inserting a new one.
 -- ============================================================
 START TRANSACTION;
 
-INSERT INTO product_reference (product_id, category_id, product_name, barcode, description)
-VALUES (200, 2, 'Beef Knuckle', NULL, 'Linked reference row for the edge-case tests.');
-
-SET @reference_id = LAST_INSERT_ID();
-
 SELECT pr.reference_id, pr.product_id, pr.category_id, pr.product_name, p.product_name AS catalogue_name
 FROM product_reference pr
-LEFT JOIN products p ON p.product_id = pr.product_id
-WHERE pr.reference_id = @reference_id;
+JOIN products p ON p.product_id = pr.product_id
+WHERE pr.product_id = 200;
 -- Expected: 1 row where product_id = 200 and catalogue_name = 'Beef Knuckle'
+
+SELECT COUNT(*) AS linked_references FROM product_reference WHERE product_id IS NOT NULL;
+-- Expected: 200, one linked reference per catalogue product
+
+SELECT COUNT(*) AS category_level_references
+FROM product_reference
+WHERE product_id IS NULL;
+-- Expected: 7681 static category-level references
 
 ROLLBACK;
 
@@ -175,7 +179,7 @@ INSERT INTO product_reference (product_id, category_id, product_name, barcode) V
 SELECT COUNT(*) AS null_product_references
 FROM product_reference
 WHERE product_id IS NULL;
--- Expected: 4 (2 seeded unlinked rows + 2 inserted here)
+-- Expected: 7685 (7681 static category-level rows + 2 seed rows + 2 inserted here)
 
 ROLLBACK;
 
@@ -211,13 +215,22 @@ ROLLBACK;
 
 -- ============================================================
 -- SCENARIO 12: UNIQUE barcode rejects a duplicate barcode
--- Seed data already uses barcode '9556000000018'.
+-- All static product_reference barcodes are NULL, so this scenario creates
+-- its own barcode inside the transaction and then duplicates it.
 -- ============================================================
 START TRANSACTION;
 
+INSERT INTO product_reference (product_id, category_id, product_name, barcode)
+VALUES (NULL, 15, 'Temp Barcode Reference One', '9999000000001');
+
+SELECT reference_id, product_name, barcode
+FROM product_reference
+WHERE barcode = '9999000000001';
+-- Expected: 1 row with the created barcode
+
 -- [EXPECTED ERROR] Duplicate entry for key 'uq_product_reference_barcode' (error 1062)
 INSERT INTO product_reference (product_id, category_id, product_name, barcode)
-VALUES (NULL, 15, 'Duplicate Barcode Reference', '9556000000018');
+VALUES (NULL, 15, 'Temp Barcode Reference Two', '9999000000001');
 
 ROLLBACK;
 
@@ -259,17 +272,21 @@ ROLLBACK;
 
 -- ============================================================
 -- SCENARIO 15: product_reference.product_id FK uses ON DELETE RESTRICT
--- Product 200 is referenced only by the temporary reference row below.
+-- Product 200 (Beef Knuckle) is linked by the static product_reference data
+-- and is not used by any inventory item, so the delete failure below is
+-- caused by the product_reference foreign key.
 -- ============================================================
 START TRANSACTION;
-
-INSERT INTO product_reference (product_id, category_id, product_name, barcode)
-VALUES (200, 2, 'Beef Knuckle', NULL);
 
 SELECT product_id, product_name
 FROM products
 WHERE product_id = 200;
 -- Expected: 1 catalogue row
+
+SELECT COUNT(*) AS referencing_rows
+FROM product_reference
+WHERE product_id = 200;
+-- Expected: 1 static reference row
 
 -- [EXPECTED ERROR] Cannot delete or update a parent row: product_reference
 -- references products (error 1451)
@@ -436,6 +453,9 @@ UNION ALL SELECT 'users', COUNT(*) FROM users
 UNION ALL SELECT 'teams', COUNT(*) FROM teams
 UNION ALL SELECT 'security_questions', COUNT(*) FROM security_questions
 UNION ALL SELECT 'product_reference', COUNT(*) FROM product_reference
+UNION ALL SELECT 'product_keyword_mapping', COUNT(*) FROM product_keyword_mapping
+UNION ALL SELECT 'price_item_reference', COUNT(*) FROM price_item_reference
+UNION ALL SELECT 'price_observations', COUNT(*) FROM price_observations
 UNION ALL SELECT 'inventory_items', COUNT(*) FROM inventory_items
 UNION ALL SELECT 'inventory_transactions', COUNT(*) FROM inventory_transactions
 UNION ALL SELECT 'reminders', COUNT(*) FROM reminders
@@ -455,13 +475,198 @@ SELECT IF(SUM(status = 'DONATED') >= 1, 'PASS', 'FAIL') AS donated_items_check F
 SELECT IF(SUM(transaction_type = 'DONATE') >= 1, 'PASS', 'FAIL') AS donate_txn_check FROM inventory_transactions;
 SELECT IF(SUM(discard_reason IS NOT NULL) >= 1 AND SUM(consumed_amount IS NOT NULL) >= 1,
           'PASS', 'FAIL') AS disposal_columns_check FROM inventory_items;
+SELECT IF(COUNT(*) = 7883, 'PASS', 'FAIL') AS product_reference_check FROM product_reference;
+SELECT IF(COUNT(*) = 24463, 'PASS', 'FAIL') AS keyword_mapping_check FROM product_keyword_mapping;
+SELECT IF(COUNT(*) = 286, 'PASS', 'FAIL') AS price_item_check FROM price_item_reference;
+SELECT IF(COUNT(*) = 2003, 'PASS', 'FAIL') AS price_observation_check FROM price_observations;
+SELECT IF(SUM(price IS NOT NULL) >= 1 AND SUM(price IS NULL) >= 1, 'PASS', 'FAIL') AS item_price_check
+FROM inventory_items;
+SELECT IF(COUNT(DISTINCT item_code) = 284, 'PASS', 'FAIL') AS priced_item_coverage_check
+FROM price_observations WHERE item_code < 900000;
+SELECT IF(COUNT(*) = 0, 'PASS', 'FAIL') AS orphan_reference_check
+FROM product_keyword_mapping km
+LEFT JOIN product_reference pr ON pr.reference_id = km.reference_id
+WHERE pr.reference_id IS NULL;
 -- Expected: every check PASS
 
 ROLLBACK;
 
 -- ============================================================
--- SCENARIO 22: clean schema recreation
--- Drop all 14 tables (reverse dependency order) so the schema can be
+-- SCENARIO 22: product_keyword_mapping insert and unique key
+-- The unique key is (reference_id, normalized_keyword, match_type).
+-- ============================================================
+START TRANSACTION;
+
+INSERT INTO product_keyword_mapping
+  (reference_id, keyword, normalized_keyword, match_type, source_name, source_url, source_locator, is_active)
+VALUES
+  (1, 'Test Keyword Mangosteen', 'test keyword mangosteen', 'TEXT', 'Edge case test',
+   'https://example.com/pantrybuddy/tests/keyword-insert', 'test/keyword/insert', TRUE);
+
+SET @mapping_id = LAST_INSERT_ID();
+
+SELECT mapping_id, reference_id, keyword, normalized_keyword, match_type, is_active
+FROM product_keyword_mapping
+WHERE mapping_id = @mapping_id;
+-- Expected: 1 row with the stored keyword and is_active = 1
+
+-- [EXPECTED ERROR] Duplicate entry for key
+-- 'uq_product_keyword_mapping_reference_keyword_type' (error 1062): the
+-- normalized keyword and match_type already exist for this reference
+INSERT INTO product_keyword_mapping
+  (reference_id, keyword, normalized_keyword, match_type, source_name, source_url)
+VALUES
+  (1, 'Test Keyword Mangosteen Copy', 'test keyword mangosteen', 'TEXT', 'Edge case test',
+   'https://example.com/pantrybuddy/tests/keyword-duplicate');
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 23: product_keyword_mapping FK uses ON DELETE RESTRICT
+-- A temporary reference row is used so the failure comes from the
+-- product_keyword_mapping foreign key.
+-- ============================================================
+START TRANSACTION;
+
+INSERT INTO product_reference (reference_id, product_id, category_id, product_name, barcode, description, is_active)
+VALUES (7891, NULL, 15, 'Temp Keyword Reference', NULL, 'Edge case test reference.', TRUE);
+
+INSERT INTO product_keyword_mapping
+  (reference_id, keyword, normalized_keyword, match_type, source_name, source_url)
+VALUES (7891, 'Temp Restrict Keyword', 'temp restrict keyword', 'TEXT', 'Edge case test',
+        'https://example.com/pantrybuddy/tests/restrict-keyword');
+
+-- [EXPECTED ERROR] Cannot delete or update a parent row:
+-- product_keyword_mapping references product_reference (error 1451)
+DELETE FROM product_reference WHERE reference_id = 7891;
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 24: price_item_reference insert and FK ON DELETE RESTRICT
+-- item_code identifies one PriceCatcher item and unit; reference_id links
+-- it to a PantryBuddy recognition reference.
+-- ============================================================
+START TRANSACTION;
+
+INSERT INTO product_reference (reference_id, product_id, category_id, product_name, barcode, description, is_active)
+VALUES (7892, NULL, 15, 'Temp Price Reference', NULL, 'Edge case test reference.', TRUE);
+
+INSERT INTO price_item_reference
+  (item_code, reference_id, source_item_name, source_unit, package_quantity_in_base_unit,
+   base_unit, median_package_price, mean_package_price, latest_day_median_price,
+   median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
+VALUES
+  (900003, 7892, 'TEST PRICE ITEM', '1 kg', 1.0000, 'kg', 5.50, 5.60, 5.50, 5.5000,
+   1, '2026-09-03', 'https://example.com/pantrybuddy/tests/price-item');
+
+SELECT item_code, reference_id, base_unit, median_package_price
+FROM price_item_reference
+WHERE item_code = 900003;
+-- Expected: 1 row with reference_id 7892 and base_unit 'kg'
+
+-- [EXPECTED ERROR] Cannot delete or update a parent row:
+-- price_item_reference references product_reference (error 1451)
+DELETE FROM product_reference WHERE reference_id = 7892;
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 25: price_observations insert and unique key
+-- The unique key is (observation_date, premise_code, item_code).
+-- ============================================================
+START TRANSACTION;
+
+INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr)
+VALUES ('2026-09-04', 9101, 900001, 12.00);
+
+SELECT observation_id, observation_date, premise_code, item_code, price_myr
+FROM price_observations
+WHERE premise_code = 9101 AND item_code = 900001;
+-- Expected: 1 row with price_myr 12.00
+
+-- [EXPECTED ERROR] Duplicate entry for key
+-- 'uq_price_observations_date_premise_item' (error 1062)
+INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr)
+VALUES ('2026-09-04', 9101, 900001, 13.00);
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 26: price_observations FK uses ON DELETE RESTRICT
+-- ============================================================
+START TRANSACTION;
+
+INSERT INTO price_item_reference
+  (item_code, reference_id, source_item_name, source_unit, package_quantity_in_base_unit,
+   base_unit, median_package_price, mean_package_price, latest_day_median_price,
+   median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
+VALUES
+  (900004, 1, 'TEST OBSERVED PRICE ITEM', '1 kg', 1.0000, 'kg', 4.50, 4.60, 4.50, 4.5000,
+   1, '2026-09-05', 'https://example.com/pantrybuddy/tests/price-observation');
+
+INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr)
+VALUES ('2026-09-05', 9102, 900004, 4.50);
+
+-- [EXPECTED ERROR] Cannot delete or update a parent row:
+-- price_observations references price_item_reference (error 1451)
+DELETE FROM price_item_reference WHERE item_code = 900004;
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 27: price_observations CHECK price_myr > 0
+-- MySQL 8.0.16+ enforces the CHECK constraint. TiDB may not enforce
+-- CHECK constraints, so on TiDB this block can succeed and must be
+-- reviewed manually.
+-- ============================================================
+START TRANSACTION;
+
+-- [EXPECTED ERROR on MySQL] Check constraint
+-- 'chk_price_observations_price_myr' is violated (error 3819)
+INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr)
+VALUES ('2026-09-06', 9103, 900001, 0.00);
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 28: inventory_items.price and the identifier chain
+-- Covers the new price column and shows how item_code resolves through
+-- reference_id to an optional catalogue product_id.
+-- ============================================================
+START TRANSACTION;
+
+SELECT inventory_item_id, unit, notes, price
+FROM inventory_items
+WHERE inventory_item_id = 1;
+-- Expected: the seeded row with unit 'pcs' and price 12.50
+
+INSERT INTO inventory_items
+  (team_id, product_id, storage_type_id, created_by, quantity, purchase_date, expiry_date_source)
+VALUES (1, 12, 1, 1, 1.00, CURDATE(), 'USER_INPUT');
+
+SET @no_price_item = LAST_INSERT_ID();
+
+SELECT inventory_item_id, unit, notes, price
+FROM inventory_items
+WHERE inventory_item_id = @no_price_item;
+-- Expected: unit 'pcs' (column default), notes NULL and price NULL because
+-- no purchase price was supplied yet
+
+SELECT pir.item_code, pir.reference_id, pr.product_name AS reference_name,
+       pr.product_id, p.product_name AS catalogue_name
+FROM price_item_reference pir
+JOIN product_reference pr ON pr.reference_id = pir.reference_id
+LEFT JOIN products p ON p.product_id = pr.product_id
+WHERE pir.item_code = 1;
+-- Expected: 1 row showing the chain item_code -> reference_id -> product_id;
+-- catalogue_name is NULL when the reference is a category-level reference
+
+ROLLBACK;
+
+-- ============================================================
+-- SCENARIO 29: clean schema recreation
+-- Drop all 17 tables (reverse dependency order) so the schema can be
 -- recreated from scratch. DDL causes implicit commits in MySQL, so this
 -- block intentionally runs without a transaction.
 --
@@ -472,6 +677,9 @@ ROLLBACK;
 -- ============================================================
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS price_observations;
+DROP TABLE IF EXISTS price_item_reference;
+DROP TABLE IF EXISTS product_keyword_mapping;
 DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS product_reference;
 DROP TABLE IF EXISTS notification_recipients;

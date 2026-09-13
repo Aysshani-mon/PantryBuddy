@@ -4,17 +4,20 @@
 -- MySQL Database Schema (schema.sql)
 --
 -- Target database : MySQL 8.0+ (InnoDB, utf8mb4)
--- Tables          : 14 (users, teams, team_members, join_requests,
+-- Tables          : 17 (users, teams, team_members, join_requests,
 --                    product_categories, products, storage_types,
 --                    inventory_items, inventory_transactions,
 --                    shelf_life_rules, reminders, notification_recipients,
---                    security_questions, product_reference)
+--                    security_questions, product_reference,
+--                    product_keyword_mapping, price_item_reference,
+--                    price_observations)
 --
 -- Iteration 2 builds on Iteration 1: the 12 Iteration 1 tables keep
 -- their columns, types, defaults, enums, indexes, unique keys,
 -- foreign keys and constraint names exactly as they were, and this
--- script adds users.is_verified plus the two new tables
--- security_questions and product_reference.
+-- script adds users.is_verified, inventory_items.price and the five new
+-- tables security_questions, product_reference, product_keyword_mapping,
+-- price_item_reference and price_observations.
 --
 -- This script is idempotent: it drops existing tables (reverse
 -- dependency order) and recreates them from scratch.
@@ -30,6 +33,9 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- Drop tables in reverse dependency order for a clean rebuild.
+DROP TABLE IF EXISTS price_observations;
+DROP TABLE IF EXISTS price_item_reference;
+DROP TABLE IF EXISTS product_keyword_mapping;
 DROP TABLE IF EXISTS security_questions;
 DROP TABLE IF EXISTS product_reference;
 DROP TABLE IF EXISTS notification_recipients;
@@ -180,6 +186,7 @@ CREATE TABLE inventory_items (
   quantity          DECIMAL(10,2)    NOT NULL,
   unit              VARCHAR(20)      NOT NULL DEFAULT 'pcs',
   notes             VARCHAR(500)     NULL,
+  price             DECIMAL(10,2)    NULL,
   production_date   DATE             NULL,
   purchase_date     DATE             NOT NULL,
   entry_date        DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -371,6 +378,80 @@ CREATE TABLE product_reference (
     REFERENCES product_categories (category_id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------------------
+-- 15. product_keyword_mapping  (Iteration 2)
+--     Recognition keywords or Open Food Facts taxonomy tags that
+--     resolve OCR text, manual text and barcode metadata to a
+--     product_reference row.
+-- ------------------------------------------------------------
+CREATE TABLE product_keyword_mapping (
+  mapping_id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  reference_id       BIGINT UNSIGNED NOT NULL,
+  keyword            VARCHAR(255)    NOT NULL,
+  normalized_keyword VARCHAR(255)    NOT NULL,
+  match_type         VARCHAR(30)     NOT NULL,
+  source_name        VARCHAR(255)    NOT NULL,
+  source_url         VARCHAR(1000)   NOT NULL,
+  source_locator     VARCHAR(1000)   NULL,
+  is_active          BOOLEAN         NOT NULL DEFAULT TRUE,
+  created_at         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (mapping_id),
+  UNIQUE KEY uq_product_keyword_mapping_reference_keyword_type (reference_id, normalized_keyword, match_type),
+  KEY idx_product_keyword_mapping_normalized_keyword (normalized_keyword),
+  KEY idx_product_keyword_mapping_reference_id (reference_id),
+  CONSTRAINT fk_product_keyword_mapping_reference FOREIGN KEY (reference_id)
+    REFERENCES product_reference (reference_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- 16. price_item_reference  (Iteration 2)
+--     Link between a PriceCatcher priced item, its package unit and
+--     a PantryBuddy product_reference row, including the calculated
+--     reference prices used by the application.
+--     item_code identifies one PriceCatcher item and unit.
+-- ------------------------------------------------------------
+CREATE TABLE price_item_reference (
+  item_code                      INT UNSIGNED    NOT NULL,
+  reference_id                   BIGINT UNSIGNED NOT NULL,
+  source_item_name               VARCHAR(255)    NOT NULL,
+  source_unit                    VARCHAR(50)     NOT NULL,
+  package_quantity_in_base_unit  DECIMAL(12,4)   NULL,
+  base_unit                      VARCHAR(20)     NOT NULL,
+  median_package_price           DECIMAL(10,2)   NULL,
+  mean_package_price             DECIMAL(10,2)   NULL,
+  latest_day_median_price        DECIMAL(10,2)   NULL,
+  median_price_per_base_unit     DECIMAL(12,4)   NULL,
+  price_observation_count        INT UNSIGNED    NOT NULL,
+  latest_observation_date        DATE            NULL,
+  source_url                     VARCHAR(1000)   NOT NULL,
+  PRIMARY KEY (item_code),
+  KEY idx_price_item_reference_reference_id (reference_id),
+  KEY idx_price_item_reference_base_unit (base_unit),
+  CONSTRAINT fk_price_item_reference_reference FOREIGN KEY (reference_id)
+    REFERENCES product_reference (reference_id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- 17. price_observations  (Iteration 2)
+--     Dated premise-level price observations for a priced item.
+--     Iteration 2 imports a 2000-row sample; the full archive of
+--     561,441 observations stays in the CSV archive.
+-- ------------------------------------------------------------
+CREATE TABLE price_observations (
+  observation_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  observation_date DATE            NOT NULL,
+  premise_code     INT UNSIGNED    NOT NULL,
+  item_code        INT UNSIGNED    NOT NULL,
+  price_myr        DECIMAL(10,2)   NOT NULL,
+  PRIMARY KEY (observation_id),
+  UNIQUE KEY uq_price_observations_date_premise_item (observation_date, premise_code, item_code),
+  KEY idx_price_observations_item_date (item_code, observation_date),
+  CONSTRAINT chk_price_observations_price_myr CHECK (price_myr > 0),
+  CONSTRAINT fk_price_observations_item FOREIGN KEY (item_code)
+    REFERENCES price_item_reference (item_code) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================
 -- MIGRATION NOTE (existing databases only)
 -- The fresh schema above already includes the unit and notes
@@ -462,4 +543,22 @@ CREATE TABLE product_reference (
 -- Re-running these statements on a database that already contains
 -- the Iteration 2 changes would fail with a duplicate column or
 -- duplicate table error.
+-- ============================================================
+
+-- ============================================================
+-- ITERATION 2 MIGRATION NOTE - PRICE AND RECOGNITION TABLES
+-- (existing databases only)
+-- The fresh schema above already contains all of these changes.
+-- Existing databases that already have the 14-table Iteration 2
+-- schema need the following statements once, in this order:
+--
+--   ALTER TABLE inventory_items
+--     ADD COLUMN price DECIMAL(10,2) NULL AFTER notes;
+--
+--   -- Then create product_keyword_mapping, price_item_reference and
+--   -- price_observations exactly as defined in sections 15, 16 and 17
+--   -- of this file.
+--
+-- insert_static_data.sql loads the rows for these three tables. It must
+-- run after the tables exist.
 -- ============================================================
