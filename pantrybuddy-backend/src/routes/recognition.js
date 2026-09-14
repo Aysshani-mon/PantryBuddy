@@ -2,15 +2,37 @@ const express = require('express');
 const pool = require('../db');
 const { ApiError, asyncHandler } = require('../util/errors');
 const { CATEGORY_DART_NAMES } = require('../util/enums');
+const vision = require('@google-cloud/vision');
 
 const router = express.Router();
 
 // ==================== Config ====================
 // Set these in .env (local) AND the Vercel dashboard (deployed), same as
 // every other env var this backend uses.
-const RECOGNITION_SERVICE_URL = process.env.RECOGNITION_SERVICE_URL; // e.g. http://<oracle-vm-ip>:8001
-const RECOGNITION_SERVICE_KEY = process.env.RECOGNITION_SERVICE_KEY; // must match the VM's systemd env
 const OFF_USER_AGENT = process.env.OFF_USER_AGENT || 'PantryBuddy/Iteration2 (team-contact-placeholder)';
+
+// ==================== Google Cloud Vision client ====================
+// Per DEPLOY_GOOGLE_VISION.md: credentials stay server-side, LABEL_DETECTION
+// only, never called directly from the browser. Deliberately NOT using the
+// GOOGLE_APPLICATION_CREDENTIALS-file pattern from that doc, since Vercel's
+// serverless functions have no persistent private disk to keep a key file
+// on (that pattern is written for a VM). Instead, the service account JSON
+// key's full contents are stored as one base64-encoded env var — the
+// standard approach for GCP auth on serverless — and decoded at startup.
+//
+// Set GOOGLE_VISION_CREDENTIALS_B64 to: base64 of the whole downloaded
+// service-account JSON key file. On the machine that has the key file:
+//   base64 -i pantrybuddy-vision.json | tr -d '\n'
+// then paste that single long string as the env var value in Vercel.
+let visionClient = null;
+function getVisionClient() {
+  if (visionClient) return visionClient;
+  const b64 = process.env.GOOGLE_VISION_CREDENTIALS_B64;
+  if (!b64) return null;
+  const credentials = JSON.parse(Buffer.from(b64, 'base64').toString('utf8'));
+  visionClient = new vision.ImageAnnotatorClient({ credentials });
+  return visionClient;
+}
 
 // ==================== Shared: keyword-mapping lookup ====================
 // Verified against the real schema.sql — product_keyword_mapping,
@@ -150,34 +172,6 @@ router.post('/recognize/barcode', asyncHandler(async (req, res) => {
   res.json({ product, candidates });
 }));
 
-// ==================== Shared: call the private recognition VM ====================
-async function callRecognitionService(path, imageBuffer) {
-  if (!RECOGNITION_SERVICE_URL || !RECOGNITION_SERVICE_KEY) {
-    throw new ApiError(500, 'Recognition service is not configured on this backend yet.');
-  }
-  let response;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000); // model inference can be slow on CPU
-    response = await fetch(`${RECOGNITION_SERVICE_URL}${path}`, {
-      method: 'POST',
-      headers: {
-        'X-Service-Key': RECOGNITION_SERVICE_KEY,
-        'Content-Type': 'image/jpeg',
-      },
-      body: imageBuffer,
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-  } catch (e) {
-    throw new ApiError(502, 'Could not reach the recognition service. It may be offline — try manual entry.');
-  }
-  if (!response.ok) {
-    throw new ApiError(502, `Recognition service returned an error (${response.status}).`);
-  }
-  return response.json();
-}
-
 function decodeImageBody(req) {
   const { imageBase64 } = req.body;
   if (!imageBase64 || typeof imageBase64 !== 'string') {
@@ -193,28 +187,44 @@ function decodeImageBody(req) {
   return buffer;
 }
 
-// ==================== 3. Photo -> SigLIP -> mapping ====================
+// ==================== 3. Photo -> Google Vision Label Detection -> mapping ====================
 // POST /recognize/image  { imageBase64 }
+//
+// Route contract (request/response shape) is UNCHANGED from the earlier
+// Oracle/SigLIP version — only what happens inside changed. The Flutter
+// side (photo_scan_screen.dart) needed no changes because of this.
+//
+// Per the team's evaluation (TEST_REPORT.md): 62.3% overall category-match
+// rate, strong for fresh whole items (Meat 100%, Seafood/Vegetables/
+// Fruits/Baked Goods/Eggs 80%), weak for packaged/processed goods (Baby
+// Food 20%, Dairy/Snacks/Frozen/Condiments 40%). This is exactly why
+// candidates here are suggestions requiring confirmation, never
+// auto-applied — same as every other recognition path in this file.
 router.post('/recognize/image', asyncHandler(async (req, res) => {
   const buffer = decodeImageBody(req);
-  const result = await callRecognitionService('/image', buffer);
-  // Reference service's /image is expected to return { labels: [{ label, score }, ...] }
-  const labels = (result.labels || []).map((l) => l.label);
-  const candidates = await resolveByKeywords(labels, 'TEXT');
-  res.json({ labels: result.labels || [], candidates });
+  const client = getVisionClient();
+  if (!client) {
+    throw new ApiError(500, 'Google Vision is not configured on this backend yet (missing GOOGLE_VISION_CREDENTIALS_B64).');
+  }
+
+  let result;
+  try {
+    [result] = await client.labelDetection({ image: { content: buffer }, maxResults: 20 });
+  } catch (e) {
+    throw new ApiError(502, `Google Vision request failed: ${e.message}`);
+  }
+
+  const labels = (result.labelAnnotations || []).map((a) => ({ label: a.description, score: a.score }));
+  const candidates = await resolveByKeywords(labels.map((l) => l.label), 'TEXT');
+  res.json({ labels, candidates });
 }));
 
-// ==================== 4. OCR -> mapping ====================
-// POST /recognize/ocr  { imageBase64 }
-router.post('/recognize/ocr', asyncHandler(async (req, res) => {
-  const buffer = decodeImageBody(req);
-  const result = await callRecognitionService('/ocr', buffer);
-  // Reference service's /ocr is expected to return { text: "..." }
-  const text = result.text || '';
-  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
-  const candidates = await resolveByKeywords(lines, 'TEXT');
-  res.json({ text, candidates });
-}));
+// ==================== OCR is intentionally NOT a server route ====================
+// Per the team's plan: OCR stays client-side (Tesseract.js in the browser,
+// see BrowserOcrService in Flutter) — it does not use Google Vision's OCR
+// and never did use the old Oracle path either way. Once text is
+// extracted client-side, it's resolved via POST /recognize/text above
+// (already generic — no dedicated /recognize/ocr route needed).
 
 // ==================== 5. Receipt (Jaya Grocer format) -> items ====================
 //
