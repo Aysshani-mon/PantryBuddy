@@ -204,6 +204,15 @@ class FoodItem {
   DiscardReason? discardReason;
   /// Set only when [disposition] is consumed.
   ConsumedAmount? consumedAmount;
+  /// Optional — what the user actually paid for this item (a total
+  /// purchase price, not a per-unit figure). Null until they enter one;
+  /// feeds the Progress tab's estimated-waste-value card when present,
+  /// ahead of any placeholder/public-data estimate (User Story 5.5).
+  double? price;
+  /// Server-computed fallback estimate from public PriceCatcher data, for
+  /// items whose product has a mapped price reference — only used when
+  /// [price] hasn't been entered by the user. Never editable directly.
+  final double? publicEstimatedPrice;
 
   FoodItem({
     required this.id,
@@ -221,6 +230,8 @@ class FoodItem {
     this.notes,
     this.discardReason,
     this.consumedAmount,
+    this.price,
+    this.publicEstimatedPrice,
   }) : addedAt = addedAt ?? DateTime.now();
 
   bool get isActive => disposition == null;

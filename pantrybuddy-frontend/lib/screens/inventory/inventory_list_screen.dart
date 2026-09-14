@@ -5,6 +5,7 @@ import '../../models/food_item.dart';
 import '../../widgets/item_card.dart';
 import 'item_detail_screen.dart';
 import 'add_edit_item_screen.dart';
+import 'receipt_scan_screen.dart';
 
 /// AC 2.5.1 — items grouped under storage-location tabs (All/Fridge/
 /// Freezer/Pantry), each showing an item count.
@@ -49,7 +50,22 @@ class _InventoryListScreenState extends State<InventoryListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Inventory')),
+      appBar: AppBar(
+        title: const Text('Inventory'),
+        actions: [
+          // TEMPORARY — testing entry point for the receipt-scan preview
+          // while the real parser is still being built against a real
+          // Jaya Grocer sample. Move this into a proper bulk-add flow
+          // once that parser exists.
+          IconButton(
+            tooltip: 'Scan receipt (preview)',
+            icon: const Icon(Icons.receipt_long_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => ReceiptScanScreen(appState: widget.appState)),
+            ),
+          ),
+        ],
+      ),
       body: ListenableBuilder(
         listenable: widget.appState,
         builder: (context, _) {

@@ -23,6 +23,7 @@ class AppState extends ChangeNotifier {
     required this.reminderRepo,
     required this.activityRepo,
     required this.shelfLifeRepo,
+    required this.recognitionRepo,
   });
 
   final UserRepository userRepo;
@@ -31,6 +32,7 @@ class AppState extends ChangeNotifier {
   final ReminderRepository reminderRepo;
   final ActivityLogRepository activityRepo;
   final ShelfLifeRepository shelfLifeRepo;
+  final RecognitionRepository recognitionRepo;
 
   AppUser? currentUser;
   Household? currentHousehold;
@@ -331,6 +333,7 @@ class AppState extends ChangeNotifier {
     required ProductCategory category,
     required DateTime useByDate,
     String? notes,
+    double? price,
   }) async {
     if (currentUser == null || currentHousehold == null) return null;
     final draft = FoodItem(
@@ -344,6 +347,7 @@ class AppState extends ChangeNotifier {
       useByDate: useByDate,
       addedByUserId: currentUser!.id,
       notes: notes,
+      price: price,
     );
     // IMPORTANT: use the item the backend actually created (real ID) —
     // not `draft`, whose id is just a local placeholder the server

@@ -5,6 +5,8 @@ import '../models/food_item.dart';
 import '../models/reminder.dart';
 import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
+import '../models/recognition_candidate.dart';
+import '../models/receipt_item_draft.dart';
 
 /// See lib/data/README.md — screens depend only on these interfaces,
 /// never on a concrete storage implementation.
@@ -147,3 +149,20 @@ abstract class ShelfLifeRepository {
     String? itemName,
   });
 }
+
+/// Epic "Recognition" — resolves manual text, a scanned barcode, a photo,
+/// or OCR'd packaging text into candidate PantryBuddy references, via the
+/// backend's product_keyword_mapping table (and, for photo/OCR, a private
+/// recognition service running SigLIP + Tesseract). Every result requires
+/// user confirmation before it's saved — none of these auto-populate an
+/// inventory item on their own.
+abstract class RecognitionRepository {
+  Future<List<RecognitionCandidate>> recognizeText(String text);
+  Future<BarcodeRecognitionResult> recognizeBarcode(String barcode);
+  Future<List<RecognitionCandidate>> recognizeImage(List<int> imageBytes);
+  Future<OcrRecognitionResult> recognizeOcr(List<int> imageBytes);
+  /// [rawText] — already OCR'd text (from BrowserOcrService), not an
+  /// image — receipt OCR happens client-side, see chat for why.
+  Future<List<ReceiptItemDraft>> recognizeReceipt(String rawText);
+}
+

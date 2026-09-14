@@ -10,6 +10,8 @@ import '../../widgets/validated_text_field.dart';
 import '../../utils/date_format.dart';
 import '../../utils/unit_options.dart';
 import 'barcode_scan_screen.dart';
+import 'photo_scan_screen.dart';
+import '../../models/recognition_candidate.dart';
 
 /// AC 2.1.1 — manual entry: name, quantity, storage location, expiry date.
 /// AC 3.1.1 / AC 3.1.2 — optionally set an expiry reminder while adding.
@@ -28,6 +30,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
   final _nameController = TextEditingController();
   final _quantityController = TextEditingController(text: '1');
   final _notesController = TextEditingController();
+  final _priceController = TextEditingController();
   final _customLeadTimeController = TextEditingController();
 
   /// Options shown in the unit dropdown — normally just [kUnitOptions],
@@ -90,6 +93,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
       _useByDate = existing.useByDate;
       _dateManuallyEdited = true; // editing an existing item — never auto-overwrite its date
       _notesController.text = existing.notes ?? '';
+      _priceController.text = existing.price == null ? '' : _formatPriceForInput(existing.price!);
     } else {
       _unit = kUnitOptions.first; // sensible default for a new item: 'pcs'
     }
@@ -104,6 +108,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
     _nameController.dispose();
     _quantityController.dispose();
     _notesController.dispose();
+    _priceController.dispose();
     _customLeadTimeController.dispose();
     super.dispose();
   }
@@ -242,15 +247,36 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
     );
   }
 
-  /// User Story 4.3 — held off until the team decides whether PantryBuddy
-  /// stays web-only or also ships on mobile (Google ML Kit / on-device
-  /// TFLite classification don't run on Flutter web). Button stays visible
-  /// so the layout is ready for when this is picked back up.
-  void _scanPhotoComingSoon() {
+  /// User Story 4.3 — opens the photo scanner and pre-fills name and
+  /// category from whatever candidate the user confirms. Storage location
+  /// is left for manual entry (recognition doesn't suggest a location).
+  Future<void> _scanPhoto() async {
+    final result = await Navigator.of(context).push<RecognitionCandidate>(
+      MaterialPageRoute(builder: (_) => PhotoScanScreen(appState: widget.appState)),
+    );
+    if (result == null || !mounted) return;
+
+    setState(() {
+      _nameController.text = result.productName;
+      if (result.category != null) {
+        _category = result.category;
+        _categoryTouched = true;
+      }
+    });
+    _scheduleSuggestionFetch();
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Photo recognition is coming in a future update.')),
+      SnackBar(content: Text(
+        result.category != null
+            ? 'Filled in "${result.productName}" (${result.categoryName}) from photo — check the details below.'
+            : 'Filled in "${result.productName}" from photo — please pick a category and check the details.',
+      )),
     );
   }
+
+  String _formatPriceForInput(double price) =>
+      price == price.roundToDouble() ? price.toStringAsFixed(0) : price.toStringAsFixed(2);
 
   int? get _effectiveLeadTime {
     if (!_wantsReminder) return null;
@@ -293,6 +319,8 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
     final quantity = double.parse(_quantityController.text.trim());
     final unit = _unit!;
     final notes = _notesController.text.trim().isEmpty ? null : _notesController.text.trim();
+    final priceText = _priceController.text.trim();
+    final price = priceText.isEmpty ? null : double.tryParse(priceText);
 
     try {
       if (_isEditing) {
@@ -303,7 +331,8 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
           ..storageLocation = _location!
           ..category = _category!
           ..useByDate = _useByDate!
-          ..notes = notes;
+          ..notes = notes
+          ..price = price;
         await widget.appState.updateItem(item);
         if (_wantsReminder) {
           await widget.appState.setReminder(item, _effectiveLeadTime!, wasCustom: _useCustomLeadTime);
@@ -317,6 +346,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
           category: _category!,
           useByDate: _useByDate!,
           notes: notes,
+          price: price,
         );
         if (_wantsReminder && newItem != null) {
           await widget.appState.setReminder(newItem, _effectiveLeadTime!, wasCustom: _useCustomLeadTime);
@@ -410,6 +440,23 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
                     alignLabelWithHint: true,
                   ),
                 ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _priceController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Price paid (optional)',
+                    hintText: 'e.g. 5.90',
+                    prefixText: 'RM ',
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) return null; // optional
+                    final parsed = double.tryParse(value.trim());
+                    if (parsed == null) return 'Enter a valid amount';
+                    if (parsed < 0) return 'Price can\'t be negative';
+                    return null;
+                  },
+                ),
                 const SizedBox(height: 8),
                 _buildReminderSection(),
                 if (_submitError != null) ...[
@@ -457,7 +504,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
         const SizedBox(width: 12),
         Expanded(
           child: OutlinedButton.icon(
-            onPressed: _scanPhotoComingSoon,
+            onPressed: _scanPhoto,
             icon: const Icon(Icons.camera_alt_outlined, size: 19),
             label: const Text('Scan photo'),
           ),

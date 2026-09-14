@@ -9,6 +9,8 @@ import '../models/food_item.dart';
 import '../models/reminder.dart';
 import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
+import '../models/recognition_candidate.dart';
+import '../models/receipt_item_draft.dart';
 import 'api_config.dart';
 import 'repository.dart';
 
@@ -28,6 +30,7 @@ class ApiDataStore
         InventoryRepository,
         ReminderRepository,
         ActivityLogRepository,
+        RecognitionRepository,
         ShelfLifeRepository {
   ApiDataStore({this.baseUrl = ApiConfig.baseUrl});
 
@@ -163,6 +166,8 @@ class ApiDataStore
         resolvedAt: json['resolvedAt'] == null ? null : DateTime.parse(json['resolvedAt'] as String),
         discardReason: DiscardReasonLabel.fromApiValue(json['discardReason'] as String?),
         consumedAmount: ConsumedAmountLabel.fromApiValue(json['consumedAmount'] as String?),
+        price: (json['price'] as num?)?.toDouble(),
+        publicEstimatedPrice: (json['publicEstimatedPrice'] as num?)?.toDouble(),
       );
 
   Reminder _reminderFromJson(Map<String, dynamic> json) => Reminder(
@@ -342,6 +347,7 @@ class ApiDataStore
       'quantity': item.quantity,
       'unit': item.unit,
       'notes': item.notes,
+      'price': item.price,
       'storageLocation': item.storageLocation.name,
       'category': item.category.name,
       'useByDate': _dateOnly(item.useByDate),
@@ -375,6 +381,7 @@ class ApiDataStore
       'quantity': item.quantity,
       'unit': item.unit,
       'notes': item.notes,
+      'price': item.price,
       'storageLocation': item.storageLocation.name,
       'category': item.category.name,
       'useByDate': _dateOnly(item.useByDate),
@@ -479,5 +486,62 @@ class ApiDataStore
             ? null
             : ShelfLifeSuggestion.fromJson(json[location.name] as Map<String, dynamic>),
     };
+  }
+
+  // ==================== RecognitionRepository ====================
+
+  RecognitionCandidate _candidateFromBackendJson(Map<String, dynamic> json) => RecognitionCandidate(
+        referenceId: json['referenceId'] as int,
+        productId: json['productId'] as int?,
+        productName: json['productName'] as String,
+        categoryName: json['categoryName'] as String,
+        category: json['categoryDartName'] == null
+            ? null
+            : ProductCategory.values.byName(json['categoryDartName'] as String),
+        matchedKeyword: json['matchedKeyword'] as String,
+        sourceName: json['sourceName'] as String,
+        sourceUrl: json['sourceUrl'] as String?,
+      );
+
+  List<RecognitionCandidate> _candidatesFromBackendJson(dynamic list) =>
+      (list as List).map((c) => _candidateFromBackendJson(c as Map<String, dynamic>)).toList();
+
+  @override
+  Future<List<RecognitionCandidate>> recognizeText(String text) async {
+    final json = await _post('/recognize/text', {'text': text}) as Map<String, dynamic>;
+    return _candidatesFromBackendJson(json['candidates']);
+  }
+
+  @override
+  Future<BarcodeRecognitionResult> recognizeBarcode(String barcode) async {
+    final json = await _post('/recognize/barcode', {'barcode': barcode}) as Map<String, dynamic>;
+    final product = json['product'] as Map<String, dynamic>?;
+    return BarcodeRecognitionResult(
+      productName: product?['name'] as String?,
+      brand: product?['brand'] as String?,
+      candidates: _candidatesFromBackendJson(json['candidates']),
+    );
+  }
+
+  @override
+  Future<List<RecognitionCandidate>> recognizeImage(List<int> imageBytes) async {
+    final json = await _post('/recognize/image', {'imageBase64': base64Encode(imageBytes)}) as Map<String, dynamic>;
+    return _candidatesFromBackendJson(json['candidates']);
+  }
+
+  @override
+  Future<OcrRecognitionResult> recognizeOcr(List<int> imageBytes) async {
+    final json = await _post('/recognize/ocr', {'imageBase64': base64Encode(imageBytes)}) as Map<String, dynamic>;
+    return OcrRecognitionResult(
+      rawText: json['text'] as String? ?? '',
+      candidates: _candidatesFromBackendJson(json['candidates']),
+    );
+  }
+
+  @override
+  Future<List<ReceiptItemDraft>> recognizeReceipt(String rawText) async {
+    final json = await _post('/recognize/receipt', {'text': rawText}) as Map<String, dynamic>;
+    final items = (json['items'] as List).cast<Map<String, dynamic>>();
+    return items.map(ReceiptItemDraft.fromJson).toList();
   }
 }

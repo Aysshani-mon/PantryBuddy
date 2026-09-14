@@ -198,7 +198,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
       summary,
     );
     final wastedItems = items.where((i) =>
-        i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!));
+        i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!)).toList();
     final estimatedValue = PriceEstimateService.estimateValue(wastedItems);
 
     return [
@@ -423,13 +423,13 @@ class _ProgressScreenState extends State<ProgressScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            Text('\$${estimatedValue.toStringAsFixed(2)}',
+            Text('RM ${estimatedValue.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.paprika)),
             const Text('Estimated', style: TextStyle(fontSize: 11, color: AppTheme.paprika, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
-            Text(
-              'Placeholder pricing — will use real item prices once the dataset is ready.',
-              style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+            const Text(
+              'This is an estimate based on current market prices and input from users.',
+              style: TextStyle(fontSize: 10.5, color: Colors.grey),
             ),
           ],
         ),

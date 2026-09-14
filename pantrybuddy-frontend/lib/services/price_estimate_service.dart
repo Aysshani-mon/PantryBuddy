@@ -1,21 +1,23 @@
 import '../models/food_item.dart';
 
-/// User Story 5.5 — estimates the $ value of wasted food.
+/// User Story 5.5 — estimates the RM value of wasted food.
 ///
-/// PLACEHOLDER PRICING: the database team's price-per-product CSV isn't
-/// ready yet, so this uses rough category-level average unit prices as a
-/// stand-in — same "stub now, swap later" pattern as ShelfLifeService and
-/// CategoryDefaultsService. Once the real dataset lands, replace
-/// [_avgUnitPrice] with a lookup keyed by product name/category (ideally
-/// via a new PriceRepository, mirroring ShelfLifeRepository's shape) —
-/// keep [estimateValue]'s signature the same so the UI doesn't change.
+/// Priority order, per the database team's price handover:
+/// 1. The user's own entered [FoodItem.price] (a real purchase price) —
+///    used as-is, since it's an actual total, not a per-unit figure.
+/// 2. [FoodItem.publicEstimatedPrice] — a server-computed fallback from
+///    real PriceCatcher data, when this product has a mapped reference.
+/// 3. The category-level placeholder average below — only reached for
+///    items with neither a user price nor a public reference (e.g.
+///    something added as a loose category reference rather than one of
+///    the priced catalogue products).
 ///
 /// Every value shown from this service should stay visibly labelled as an
 /// *estimate* in the UI (AC 5.5) — never presented as an exact figure,
-/// since the underlying price is a guess, not sourced data.
+/// since only case 1 is a real number the rest are estimates/guesses.
 class PriceEstimateService {
-  /// Rough average price per unit (treated as "per item", regardless of
-  /// the item's actual unit/quantity — a deliberately simple placeholder).
+  /// Rough average price per unit in RM (treated as "per item", regardless
+  /// of the item's actual unit/quantity) — last-resort placeholder only.
   static const Map<ProductCategory, double> _avgUnitPrice = {
     ProductCategory.dairy: 4.50,
     ProductCategory.meat: 8.00,
@@ -35,15 +37,27 @@ class PriceEstimateService {
     ProductCategory.eggs: 4.00,
   };
 
-  static double _priceFor(ProductCategory category) => _avgUnitPrice[category] ?? 4.00;
+  static double _placeholderFor(ProductCategory category) => _avgUnitPrice[category] ?? 4.00;
+
+  /// The single-item value used everywhere below: user price first, then
+  /// the public estimate, then the category placeholder as a last resort.
+  static double valueFor(FoodItem item) {
+    if (item.price != null) return item.price!;
+    if (item.publicEstimatedPrice != null) return item.publicEstimatedPrice! * item.quantity;
+    return _placeholderFor(item.category) * item.quantity;
+  }
+
+  /// Whether [valueFor] had to fall back to the category placeholder for
+  /// this item (i.e. neither a real user price nor public data existed) —
+  /// lets the UI optionally flag "rough estimate" vs. "based on real data".
+  static bool isPlaceholder(FoodItem item) => item.price == null && item.publicEstimatedPrice == null;
 
   /// Estimated total value of [items] (already filtered to whichever set
-  /// — e.g. wasted-this-week — the caller wants priced), using each
-  /// item's quantity x its category's placeholder unit price.
+  /// — e.g. wasted-this-week — the caller wants priced).
   static double estimateValue(Iterable<FoodItem> items) {
     var total = 0.0;
     for (final item in items) {
-      total += _priceFor(item.category) * item.quantity;
+      total += valueFor(item);
     }
     return total;
   }

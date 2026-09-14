@@ -62,6 +62,7 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
       reminderRepo: widget.dataStore,
       activityRepo: widget.dataStore,
       shelfLifeRepo: widget.dataStore,
+      recognitionRepo: widget.dataStore,
     );
     // AC 3.2.1 — periodically checks for due reminders. A real deployment
     // would use a platform notification package (e.g. flutter_local_notifications)
