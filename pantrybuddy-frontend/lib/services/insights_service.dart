@@ -119,13 +119,19 @@ class InsightsService {
 
   // ==================== 5.3 — trend over time ====================
 
+  /// AC 5.3.7 — a day within the range with genuinely no activity shows
+  /// as a real, plotted zero; a day that hasn't happened yet is simply
+  /// never generated as a point at all (not "zero", not plotted).
   static List<TrendPoint> trend(List<FoodItem> allItems, DateRange range, {String? userId}) {
     final scoped = _scoped(allItems, userId).toList();
     final points = <TrendPoint>[];
     var day = DateTime(range.start.year, range.start.month, range.start.day);
+    final today = DateTime.now();
+    final todayDateOnly = DateTime(today.year, today.month, today.day);
     final lastDay = DateTime(range.end.year, range.end.month, range.end.day);
+    final lastPlottableDay = lastDay.isAfter(todayDateOnly) ? todayDateOnly : lastDay;
 
-    while (!day.isAfter(lastDay)) {
+    while (!day.isAfter(lastPlottableDay)) {
       final dayEnd = DateTime(day.year, day.month, day.day, 23, 59, 59, 999);
       final consumed = scoped.where((i) =>
           i.disposition == ItemDisposition.consumed &&
@@ -162,10 +168,17 @@ class InsightsService {
   /// and directly traceable to the person's own data, which matters more
   /// here than model sophistication, and there's no training data for a
   /// fresh household anyway.
+  ///
+  /// AC 5.4.3 — a recorded discard REASON is checked first, since "why"
+  /// something was wasted is more actionable than "what category" it was
+  /// in (the two aren't mutually exclusive — a dominant reason wins when
+  /// one exists; category is the fallback for when reasons are spread out
+  /// or unrecorded).
   static WasteSuggestion generateSuggestion(
     List<CategoryWasteCount> breakdown,
-    PeriodSummary summary,
-  ) {
+    PeriodSummary summary, {
+    List<DiscardReasonCount> reasonBreakdown = const [],
+  }) {
     if (summary.wasted == 0) {
       return const WasteSuggestion(
         headline: 'No waste this period!',
@@ -173,11 +186,21 @@ class InsightsService {
       );
     }
 
+    // Reason-based first (AC 5.4.3).
+    if (reasonBreakdown.isNotEmpty) {
+      final topReason = reasonBreakdown.first;
+      final reasonShare = summary.wasted == 0 ? 0.0 : topReason.count / summary.wasted;
+      if (reasonShare >= 0.4) {
+        return WasteSuggestion(
+          headline: '"${topReason.reason.label}" is your most common reason for waste',
+          detail: _tipForReason(topReason.reason),
+        );
+      }
+    }
+
+    // Category-based fallback.
     final top = breakdown.first; // breakdown is pre-sorted, highest count first
     final share = summary.wasted == 0 ? 0.0 : top.count / summary.wasted;
-
-    // A clearly-dominant category gets a specific, actionable tip;
-    // otherwise (waste spread fairly evenly) a general one.
     if (share >= 0.4) {
       return WasteSuggestion(
         headline: 'You wasted more ${top.category.label} than anything else',
@@ -188,6 +211,24 @@ class InsightsService {
       headline: 'Your waste is spread across a few categories',
       detail: 'Try checking use-by dates before your next shop, so you know what to use up first.',
     );
+  }
+
+  /// AC 5.4.3's own example: "suggesting a smaller purchase quantity when
+  /// 'Bought too much' was selected" — this is that rule, plus one for
+  /// each of the other recorded reasons.
+  static String _tipForReason(DiscardReason reason) {
+    switch (reason) {
+      case DiscardReason.overbought:
+        return 'Try buying a smaller quantity next time — or split a bulk pack with someone in the household.';
+      case DiscardReason.spoiled:
+        return 'This usually means it needs colder or better storage — double check your fridge temperature, or move it somewhere cooler sooner after buying.';
+      case DiscardReason.expiredNotSpoiled:
+        return 'Looked fine but the date had passed — try setting a reminder a couple of days earlier, or move older stock to the front so it gets used first.';
+      case DiscardReason.qualityDeclined:
+        return 'Consider an airtight container or a different shelf — how something is stored often affects how fast it declines, not just how long it sits.';
+      case DiscardReason.other:
+        return 'Take a look at the pattern behind these — a specific reason next time will help pinpoint a more useful tip.';
+    }
   }
 
   static String _tipFor(ProductCategory category) {
@@ -216,12 +257,10 @@ class InsightsService {
 
   // ==================== Household-only: why food was wasted ====================
 
-  /// Breakdown by the user's own stated DiscardReason (spoiled / expired
-  /// not spoiled / quality declined / other) — deliberately using the real
-  /// enum already captured in the discard flow, not a richer "root cause"
-  /// taxonomy (no data exists for that yet).
-  static List<DiscardReasonCount> discardReasonBreakdown(List<FoodItem> allItems, DateRange range) {
-    final wasted = allItems.where((i) =>
+  /// Breakdown by the user's own stated DiscardReason. [userId] null =
+  /// household-wide; non-null = just that member's own added items.
+  static List<DiscardReasonCount> discardReasonBreakdown(List<FoodItem> allItems, DateRange range, {String? userId}) {
+    final wasted = _scoped(allItems, userId).where((i) =>
         i.disposition == ItemDisposition.discarded &&
         i.resolvedAt != null &&
         range.contains(i.resolvedAt!) &&

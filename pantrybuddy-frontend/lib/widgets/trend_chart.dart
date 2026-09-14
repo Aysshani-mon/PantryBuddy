@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import '../models/insights_data.dart';
 
-/// User Story 5.3's trend chart — three lines (consumed/wasted/stored)
-/// over the selected period's days. Deliberately dependency-free (plain
-/// CustomPainter) rather than pulling in a charting package.
+/// User Story 5.3's trend chart — grouped bars (Consumed / Wasted side by
+/// side per day) rather than lines. Switched from a line chart because
+/// two series with an identical value on the same day would draw exactly
+/// on top of each other and one would completely hide the other — bars
+/// next to each other can't do that. Days with no activity show a real,
+/// visible zero-height bar; days that haven't happened yet are never
+/// generated as a group at all (see InsightsService.trend / AC 5.3.7) —
+/// if there's nothing to plot, this shows an empty state instead.
 class TrendChart extends StatelessWidget {
   const TrendChart({super.key, required this.points, this.height = 180});
   final List<TrendPoint> points;
@@ -12,18 +17,23 @@ class TrendChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (points.isEmpty) {
-      return SizedBox(height: height, child: const Center(child: Text('No data yet')));
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: Text('Nothing to show yet for this period', style: TextStyle(color: Colors.grey.shade500, fontSize: 12.5)),
+        ),
+      );
     }
     return SizedBox(
       height: height,
       width: double.infinity,
-      child: CustomPaint(painter: _TrendPainter(points)),
+      child: CustomPaint(painter: _TrendBarPainter(points)),
     );
   }
 }
 
-class _TrendPainter extends CustomPainter {
-  _TrendPainter(this.points);
+class _TrendBarPainter extends CustomPainter {
+  _TrendBarPainter(this.points);
   final List<TrendPoint> points;
 
   static const _consumedColor = Color(0xFF2E7D4F);
@@ -45,7 +55,6 @@ class _TrendPainter extends CustomPainter {
       ..strokeWidth = 1;
     final labelStyle = TextStyle(color: Colors.grey.shade600, fontSize: 9);
 
-    // Horizontal gridlines + y-axis labels (0, mid, max).
     for (final fraction in [0.0, 0.5, 1.0]) {
       final y = chartHeight - (chartHeight * fraction);
       canvas.drawLine(Offset(leftPad, y), Offset(size.width, y), gridPaint);
@@ -57,51 +66,49 @@ class _TrendPainter extends CustomPainter {
       tp.paint(canvas, Offset(leftPad - tp.width - 4, y - tp.height / 2));
     }
 
-    double xFor(int i) => points.length == 1
-        ? leftPad + chartWidth / 2
-        : leftPad + (chartWidth * i / (points.length - 1));
-    double yFor(int value) => chartHeight - (chartHeight * value / maxVal);
+    // Each day gets a "slot"; two bars (consumed, wasted) sit side by
+    // side within it, with a little padding between slots and between
+    // the two bars in a slot.
+    final slotWidth = chartWidth / points.length;
+    final groupPadding = slotWidth * 0.18;
+    final barGap = slotWidth * 0.06;
+    final barWidth = (slotWidth - groupPadding * 2 - barGap) / 2;
 
-    void drawLine(List<int> values, Color color) {
-      final paint = Paint()
-        ..color = color
-        ..strokeWidth = 2.2
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round;
-      final path = Path();
-      for (var i = 0; i < values.length; i++) {
-        final point = Offset(xFor(i), yFor(values[i]));
-        if (i == 0) {
-          path.moveTo(point.dx, point.dy);
-        } else {
-          path.lineTo(point.dx, point.dy);
-        }
-      }
-      canvas.drawPath(path, paint);
-      final dotPaint = Paint()..color = color;
-      for (var i = 0; i < values.length; i++) {
-        canvas.drawCircle(Offset(xFor(i), yFor(values[i])), 2.8, dotPaint);
-      }
-    }
+    double heightFor(int value) => maxVal == 0 ? 0 : chartHeight * value / maxVal;
 
-    drawLine(points.map((p) => p.consumed).toList(), _consumedColor);
-    drawLine(points.map((p) => p.wasted).toList(), _wastedColor);
-
-    // X-axis day labels — thin out if there are many points (monthly view)
-    // so labels don't overlap.
+    final consumedPaint = Paint()..color = _consumedColor;
+    final wastedPaint = Paint()..color = _wastedColor;
     const weekdayShort = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    final step = (points.length / 7).ceil().clamp(1, points.length);
-    for (var i = 0; i < points.length; i += step) {
-      final date = points[i].date;
-      final label = points.length <= 10 ? weekdayShort[date.weekday - 1] : '${date.day}';
-      final tp = TextPainter(
-        text: TextSpan(text: label, style: labelStyle),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, Offset(xFor(i) - tp.width / 2, chartHeight + 4));
+
+    for (var i = 0; i < points.length; i++) {
+      final slotLeft = leftPad + slotWidth * i;
+      final consumedLeft = slotLeft + groupPadding;
+      final wastedLeft = consumedLeft + barWidth + barGap;
+
+      final consumedH = heightFor(points[i].consumed);
+      final wastedH = heightFor(points[i].wasted);
+
+      // Draw a minimum visible sliver even for a real zero, so a zero bar
+      // still reads as "plotted" rather than looking identical to empty
+      // space — a deliberate 2px floor, not a value change.
+      final consumedRect = Rect.fromLTWH(consumedLeft, chartHeight - (consumedH < 1 ? 1.5 : consumedH), barWidth, consumedH < 1 ? 1.5 : consumedH);
+      final wastedRect = Rect.fromLTWH(wastedLeft, chartHeight - (wastedH < 1 ? 1.5 : wastedH), barWidth, wastedH < 1 ? 1.5 : wastedH);
+      canvas.drawRRect(RRect.fromRectAndCorners(consumedRect, topLeft: const Radius.circular(2), topRight: const Radius.circular(2)), consumedPaint);
+      canvas.drawRRect(RRect.fromRectAndCorners(wastedRect, topLeft: const Radius.circular(2), topRight: const Radius.circular(2)), wastedPaint);
+
+      // Day label — thin out if there are many points (monthly view).
+      final step = (points.length / 10).ceil().clamp(1, points.length);
+      if (i % step == 0) {
+        final label = points.length <= 10 ? weekdayShort[points[i].date.weekday - 1] : '${points[i].date.day}';
+        final tp = TextPainter(
+          text: TextSpan(text: label, style: labelStyle),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        tp.paint(canvas, Offset(slotLeft + slotWidth / 2 - tp.width / 2, chartHeight + 4));
+      }
     }
   }
 
   @override
-  bool shouldRepaint(covariant _TrendPainter oldDelegate) => oldDelegate.points != points;
+  bool shouldRepaint(covariant _TrendBarPainter oldDelegate) => oldDelegate.points != points;
 }

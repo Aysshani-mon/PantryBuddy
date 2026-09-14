@@ -27,7 +27,6 @@ class ReceiptScanScreen extends StatefulWidget {
 
 class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
   _Stage _stage = _Stage.capture;
-  Uint8List? _imageBytes;
   String? _error;
   List<ReceiptItemDraft> _drafts = [];
 
@@ -37,7 +36,6 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
     if (picked == null) return;
     final bytes = await picked.readAsBytes();
     setState(() {
-      _imageBytes = bytes;
       _error = null;
       _stage = _Stage.working;
     });
@@ -203,11 +201,11 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
     final includedCount = _drafts.where((d) => d.included).length;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
           child: Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text('Check each item below — edit anything that\'s wrong, untick anything to skip.',
                     style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
               ),

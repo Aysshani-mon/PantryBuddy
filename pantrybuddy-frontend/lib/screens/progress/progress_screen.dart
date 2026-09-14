@@ -193,13 +193,15 @@ class _ProgressScreenState extends State<ProgressScreen> {
     // Household: unchanged from before (trend just no longer plots Stored,
     // handled globally in TrendChart).
     final breakdown = InsightsService.categoryBreakdown(items, range, userId: userId);
+    final reasonBreakdown = InsightsService.discardReasonBreakdown(items, range, userId: userId);
     final suggestion = InsightsService.generateSuggestion(
       breakdown.isEmpty ? [const CategoryWasteCount(ProductCategory.shelfStableFoods, 0)] : breakdown,
       summary,
+      reasonBreakdown: reasonBreakdown,
     );
     final wastedItems = items.where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!)).toList();
-    final estimatedValue = PriceEstimateService.estimateValue(wastedItems);
+    final priceResult = PriceEstimateService.estimate(wastedItems);
 
     return [
       _buildStatCardsRow(summary),
@@ -213,11 +215,11 @@ class _ProgressScreenState extends State<ProgressScreen> {
         children: [
           Expanded(child: _buildCategoryBreakdownCard(breakdown)),
           const SizedBox(width: 12),
-          Expanded(child: _buildEstimatedValueCard(estimatedValue)),
+          Expanded(child: _buildEstimatedValueCard(priceResult)),
         ],
       ),
       const SizedBox(height: 16),
-      _buildDiscardReasonCard(InsightsService.discardReasonBreakdown(items, range)),
+      _buildDiscardReasonCard(reasonBreakdown),
       const SizedBox(height: 16),
       _buildSuggestionCard(suggestion),
     ];
@@ -408,7 +410,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
     );
   }
 
-  Widget _buildEstimatedValueCard(double estimatedValue) {
+  Widget _buildEstimatedValueCard(PriceEstimateResult result) {
     return Card(
       color: AppTheme.honeyLight,
       child: Padding(
@@ -423,7 +425,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            Text('RM ${estimatedValue.toStringAsFixed(2)}',
+            Text('RM ${result.total.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.paprika)),
             const Text('Estimated', style: TextStyle(fontSize: 11, color: AppTheme.paprika, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
@@ -431,6 +433,13 @@ class _ProgressScreenState extends State<ProgressScreen> {
               'This is an estimate based on current market prices and input from users.',
               style: TextStyle(fontSize: 10.5, color: Colors.grey),
             ),
+            if (result.hasExclusions) ...[
+              const SizedBox(height: 4),
+              Text(
+                '${result.excludedCount} item${result.excludedCount == 1 ? '' : 's'} not included — no price available.',
+                style: const TextStyle(fontSize: 10.5, color: AppTheme.paprika, fontWeight: FontWeight.w600),
+              ),
+            ],
           ],
         ),
       ),

@@ -204,7 +204,7 @@ router.put('/inventory-items/:id', asyncHandler(async (req, res) => {
 
 // Valid values the client can send for the subjective fields — validated
 // server-side so bad/unexpected values can't get stored.
-const VALID_DISCARD_REASONS = ['spoiled', 'expired_not_spoiled', 'quality_declined', 'other'];
+const VALID_DISCARD_REASONS = ['spoiled', 'expired_not_spoiled', 'quality_declined', 'overbought', 'other'];
 const VALID_CONSUMED_AMOUNTS = ['partial', 'half', 'full'];
 
 // POST /inventory-items/:id/resolve

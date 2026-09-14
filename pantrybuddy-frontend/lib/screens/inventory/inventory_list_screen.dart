@@ -50,22 +50,7 @@ class _InventoryListScreenState extends State<InventoryListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Inventory'),
-        actions: [
-          // TEMPORARY — testing entry point for the receipt-scan preview
-          // while the real parser is still being built against a real
-          // Jaya Grocer sample. Move this into a proper bulk-add flow
-          // once that parser exists.
-          IconButton(
-            tooltip: 'Scan receipt (preview)',
-            icon: const Icon(Icons.receipt_long_outlined),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => ReceiptScanScreen(appState: widget.appState)),
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('Inventory')),
       body: ListenableBuilder(
         listenable: widget.appState,
         builder: (context, _) {
@@ -111,11 +96,27 @@ class _InventoryListScreenState extends State<InventoryListScreen>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => AddEditItemScreen(appState: widget.appState),
-        )),
-        child: const Icon(Icons.add),
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton(
+            heroTag: 'scanReceiptFab',
+            tooltip: 'Scan receipt',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => ReceiptScanScreen(appState: widget.appState),
+            )),
+            child: const Icon(Icons.receipt_long_outlined),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'addItemFab',
+            tooltip: 'Add item',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => AddEditItemScreen(appState: widget.appState),
+            )),
+            child: const Icon(Icons.add),
+          ),
+        ],
       ),
     );
   }
