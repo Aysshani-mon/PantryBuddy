@@ -105,7 +105,7 @@ enum ItemDisposition { consumed, discarded, donated }
 /// The user's own stated reason for discarding — distinct from the
 /// backend's separate auto-computed EXPIRED/USER_DISCARDED timing
 /// classification on the transaction row (see backend README).
-enum DiscardReason { spoiled, expiredNotSpoiled, qualityDeclined, overbought, other }
+enum DiscardReason { spoiled, expiredNotSpoiled, qualityDeclined, overbought, forgotAboutIt, other }
 
 extension DiscardReasonLabel on DiscardReason {
   String get label {
@@ -118,6 +118,8 @@ extension DiscardReasonLabel on DiscardReason {
         return 'Quality declined';
       case DiscardReason.overbought:
         return 'Bought too much';
+      case DiscardReason.forgotAboutIt:
+        return 'Forgot about it';
       case DiscardReason.other:
         return 'Other reason';
     }
@@ -135,6 +137,8 @@ extension DiscardReasonLabel on DiscardReason {
         return 'quality_declined';
       case DiscardReason.overbought:
         return 'overbought';
+      case DiscardReason.forgotAboutIt:
+        return 'forgot_about_it';
       case DiscardReason.other:
         return 'other';
     }

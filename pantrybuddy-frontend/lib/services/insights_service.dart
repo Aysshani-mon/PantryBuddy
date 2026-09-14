@@ -162,55 +162,98 @@ class InsightsService {
     return list;
   }
 
-  // ==================== 5.4 — waste reduction suggestion ====================
+  // ==================== 5.4 — waste reduction suggestions ====================
 
-  /// Rule-based, not ML — see the chat explanation: this is explainable
-  /// and directly traceable to the person's own data, which matters more
-  /// here than model sophistication, and there's no training data for a
-  /// fresh household anyway.
-  ///
-  /// AC 5.4.3 — a recorded discard REASON is checked first, since "why"
-  /// something was wasted is more actionable than "what category" it was
-  /// in (the two aren't mutually exclusive — a dominant reason wins when
-  /// one exists; category is the fallback for when reasons are spread out
-  /// or unrecorded).
-  static WasteSuggestion generateSuggestion(
+  /// AC 5.4.3 — one card per recorded discard reason with a meaningful
+  /// share (not just the single dominant one), each addressing that
+  /// specific reason. Falls back to category if reasons aren't recorded.
+  static List<WasteSuggestion> generateRecommendedChanges(
     List<CategoryWasteCount> breakdown,
     PeriodSummary summary, {
     List<DiscardReasonCount> reasonBreakdown = const [],
   }) {
     if (summary.wasted == 0) {
-      return const WasteSuggestion(
-        headline: 'No waste this period!',
-        detail: 'Keep it up — whatever you\'re doing is working.',
-      );
+      return const [WasteSuggestion(headline: 'No waste this period!', detail: 'Keep it up — whatever you\'re doing is working.')];
     }
 
-    // Reason-based first (AC 5.4.3).
-    if (reasonBreakdown.isNotEmpty) {
-      final topReason = reasonBreakdown.first;
-      final reasonShare = summary.wasted == 0 ? 0.0 : topReason.count / summary.wasted;
-      if (reasonShare >= 0.4) {
-        return WasteSuggestion(
-          headline: '"${topReason.reason.label}" is your most common reason for waste',
-          detail: _tipForReason(topReason.reason),
-        );
+    final tips = <WasteSuggestion>[];
+    for (final r in reasonBreakdown.take(2)) {
+      final share = r.count / summary.wasted;
+      if (share < 0.15) continue; // skip a reason that's barely present
+      tips.add(WasteSuggestion(headline: r.reason.label, detail: _tipForReason(r.reason)));
+    }
+    if (tips.isEmpty && breakdown.isNotEmpty) {
+      final top = breakdown.first;
+      tips.add(WasteSuggestion(headline: '${top.category.label} wasted most', detail: _tipFor(top.category)));
+    }
+    if (tips.isEmpty) {
+      tips.add(const WasteSuggestion(
+        headline: 'Keep an eye on use-by dates',
+        detail: 'Check dates before your next shop so you know what to use up first.',
+      ));
+    }
+    return tips;
+  }
+
+  /// Forward-looking, unlike everything else in this class — based on
+  /// what's currently sitting in the fridge/pantry about to expire, not
+  /// past waste. Deliberately rule-based (freeze-friendly categories vs.
+  /// "use it soon"), same reasoning as the reason-based tips: explainable
+  /// and traceable to real data, not a model.
+  static List<WasteSuggestion> generateActionTips(List<FoodItem> allItems, {String? userId, int maxTips = 3}) {
+    final active = _scoped(allItems, userId).where((i) => i.isActive).toList()
+      ..sort((a, b) => a.useByDate.compareTo(b.useByDate));
+    final soon = active.where((i) => i.daysLeft <= 3).toList();
+
+    final tips = <WasteSuggestion>[];
+    final usedNames = <String>{};
+    for (final item in soon) {
+      if (tips.length >= maxTips) break;
+      final key = item.name.trim().toLowerCase();
+      if (usedNames.contains(key)) continue;
+      usedNames.add(key);
+
+      final sameCategorySoonCount = soon.where((i) => i.category == item.category).length;
+      final dayLabel = _weekdayName(item.useByDate);
+      final impact = sameCategorySoonCount > 1
+          ? 'Could prevent $sameCategorySoonCount items from spoiling.'
+          : 'It\'s the next item in your inventory to expire.';
+
+      if (_freezesWell(item.category) && item.storageLocation != StorageLocation.freezer) {
+        tips.add(WasteSuggestion(
+          headline: 'Freeze ${item.name} today',
+          detail: 'Freezing can extend usable life well beyond $dayLabel, instead of losing it.',
+        ));
+      } else if (item.category == ProductCategory.dairy || item.category == ProductCategory.eggs) {
+        tips.add(WasteSuggestion(headline: 'Plan ${item.name} into breakfast', detail: impact));
+      } else {
+        tips.add(WasteSuggestion(headline: 'Use ${item.name} by $dayLabel', detail: impact));
       }
     }
-
-    // Category-based fallback.
-    final top = breakdown.first; // breakdown is pre-sorted, highest count first
-    final share = summary.wasted == 0 ? 0.0 : top.count / summary.wasted;
-    if (share >= 0.4) {
-      return WasteSuggestion(
-        headline: 'You wasted more ${top.category.label} than anything else',
-        detail: _tipFor(top.category),
-      );
+    if (tips.isEmpty) {
+      tips.add(const WasteSuggestion(
+        headline: 'Nothing urgent right now',
+        detail: 'No items are close to their use-by date — nice work staying on top of things.',
+      ));
     }
-    return const WasteSuggestion(
-      headline: 'Your waste is spread across a few categories',
-      detail: 'Try checking use-by dates before your next shop, so you know what to use up first.',
-    );
+    return tips;
+  }
+
+  static bool _freezesWell(ProductCategory category) {
+    switch (category) {
+      case ProductCategory.meat:
+      case ProductCategory.seafood:
+      case ProductCategory.bakedGoods:
+      case ProductCategory.deliPreparedFoods:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  static String _weekdayName(DateTime date) {
+    const names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    return names[date.weekday - 1];
   }
 
   /// AC 5.4.3's own example: "suggesting a smaller purchase quantity when
@@ -224,6 +267,8 @@ class InsightsService {
         return 'This usually means it needs colder or better storage — double check your fridge temperature, or move it somewhere cooler sooner after buying.';
       case DiscardReason.expiredNotSpoiled:
         return 'Looked fine but the date had passed — try setting a reminder a couple of days earlier, or move older stock to the front so it gets used first.';
+      case DiscardReason.forgotAboutIt:
+        return 'Try setting your expiry reminders a day or two earlier, or keep easy-to-forget items somewhere more visible.';
       case DiscardReason.qualityDeclined:
         return 'Consider an airtight container or a different shelf — how something is stored often affects how fast it declines, not just how long it sits.';
       case DiscardReason.other:

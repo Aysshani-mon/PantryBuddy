@@ -194,11 +194,12 @@ class _ProgressScreenState extends State<ProgressScreen> {
     // handled globally in TrendChart).
     final breakdown = InsightsService.categoryBreakdown(items, range, userId: userId);
     final reasonBreakdown = InsightsService.discardReasonBreakdown(items, range, userId: userId);
-    final suggestion = InsightsService.generateSuggestion(
+    final recommendedChanges = InsightsService.generateRecommendedChanges(
       breakdown.isEmpty ? [const CategoryWasteCount(ProductCategory.shelfStableFoods, 0)] : breakdown,
       summary,
       reasonBreakdown: reasonBreakdown,
     );
+    final actionTips = InsightsService.generateActionTips(items, userId: userId);
     final wastedItems = items.where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!)).toList();
     final estimatedValue = PriceEstimateService.estimateValue(wastedItems);
@@ -221,7 +222,9 @@ class _ProgressScreenState extends State<ProgressScreen> {
       const SizedBox(height: 16),
       _buildDiscardReasonCard(reasonBreakdown),
       const SizedBox(height: 16),
-      _buildSuggestionCard(suggestion),
+      _buildActionTipsCard(actionTips),
+      const SizedBox(height: 16),
+      _buildRecommendedChangesCard(recommendedChanges),
     ];
   }
 
@@ -491,26 +494,96 @@ class _ProgressScreenState extends State<ProgressScreen> {
     );
   }
 
-  Widget _buildSuggestionCard(WasteSuggestion suggestion) {
+  /// Forward-looking, numbered — items currently in stock about to
+  /// expire, with a specific action per item (matches the "Ways to
+  /// reduce food waste" mockup).
+  Widget _buildActionTipsCard(List<WasteSuggestion> tips) {
     return Card(
-      color: AppTheme.honeyLight,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.lightbulb_outline, color: AppTheme.honey),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(suggestion.headline, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 4),
-                  Text(suggestion.detail, style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
-                ],
+            const Text('Ways to reduce food waste', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 12),
+            for (var i = 0; i < tips.length; i++)
+              Container(
+                margin: EdgeInsets.only(bottom: i == tips.length - 1 ? 0 : 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppTheme.basilLight, borderRadius: BorderRadius.circular(14)),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundColor: AppTheme.seedColor,
+                      child: Text('${i + 1}', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(tips[i].headline, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                          const SizedBox(height: 2),
+                          Text(tips[i].detail, style: TextStyle(color: Colors.grey.shade700, fontSize: 12.5)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+            const SizedBox(height: 4),
+            Text('Based on what\'s currently in your inventory and approaching its use-by date.',
+                style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Root-cause based, checkmarked — up to a few discard reasons at once,
+  /// not just the single dominant one (matches the "Recommended changes"
+  /// mockup).
+  Widget _buildRecommendedChangesCard(List<WasteSuggestion> changes) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Recommended changes', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+            const SizedBox(height: 12),
+            for (var i = 0; i < changes.length; i++)
+              Container(
+                margin: EdgeInsets.only(bottom: i == changes.length - 1 ? 0 : 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppTheme.basilLight, borderRadius: BorderRadius.circular(14)),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const CircleAvatar(
+                      radius: 12,
+                      backgroundColor: AppTheme.seedColor,
+                      child: Icon(Icons.check, color: Colors.white, size: 14),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(changes[i].headline, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
+                          const SizedBox(height: 2),
+                          Text(changes[i].detail, style: TextStyle(color: Colors.grey.shade700, fontSize: 12.5)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
+            Text('Based on discard reasons recorded by household members.',
+                style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600)),
           ],
         ),
       ),
