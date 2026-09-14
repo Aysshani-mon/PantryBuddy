@@ -11,11 +11,12 @@ const activityRouter = require('./routes/activity');
 const shelfLifeRouter = require('./routes/shelf_life');
 const { ApiError } = require('./util/errors');
 const { requireAuth } = require('./util/auth');
+const recognitionRouter = require('./routes/recognition');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-
+app.use('/', recognitionRouter);
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Public — no token needed to sign up, sign in, or request a password reset.
