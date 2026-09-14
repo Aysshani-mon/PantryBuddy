@@ -9,14 +9,19 @@ const inventoryRouter = require('./routes/inventory');
 const remindersRouter = require('./routes/reminders');
 const activityRouter = require('./routes/activity');
 const shelfLifeRouter = require('./routes/shelf_life');
+const recognitionRouter = require('./routes/recognition');
 const { ApiError } = require('./util/errors');
 const { requireAuth } = require('./util/auth');
-const recognitionRouter = require('./routes/recognition');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use('/', recognitionRouter);
+// Default express.json() limit is 100kb — far too small for a base64-
+// encoded photo upload (a compressed ~150KB JPEG becomes ~200KB as
+// base64). Recognition routes already separately cap the decoded image
+// at 6MB (see decodeImageBody in recognition.js) — this just needs to be
+// comfortably above that once base64-inflated, not the actual real limit.
+app.use(express.json({ limit: '10mb' }));
+
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Public — no token needed to sign up, sign in, or request a password reset.
@@ -37,6 +42,7 @@ app.use('/', inventoryRouter);
 app.use('/', activityRouter);
 app.use('/', remindersRouter);
 app.use('/', shelfLifeRouter);
+app.use('/', recognitionRouter);
 
 // 404 handler
 app.use((req, res) => {
