@@ -201,7 +201,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
     );
     final wastedItems = items.where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!)).toList();
-    final priceResult = PriceEstimateService.estimate(wastedItems);
+    final estimatedValue = PriceEstimateService.estimateValue(wastedItems);
 
     return [
       _buildStatCardsRow(summary),
@@ -215,7 +215,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
         children: [
           Expanded(child: _buildCategoryBreakdownCard(breakdown)),
           const SizedBox(width: 12),
-          Expanded(child: _buildEstimatedValueCard(priceResult)),
+          Expanded(child: _buildEstimatedValueCard(estimatedValue)),
         ],
       ),
       const SizedBox(height: 16),
@@ -410,7 +410,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
     );
   }
 
-  Widget _buildEstimatedValueCard(PriceEstimateResult result) {
+  Widget _buildEstimatedValueCard(double estimatedValue) {
     return Card(
       color: AppTheme.honeyLight,
       child: Padding(
@@ -425,7 +425,7 @@ class _ProgressScreenState extends State<ProgressScreen> {
               ],
             ),
             const SizedBox(height: 10),
-            Text('RM ${result.total.toStringAsFixed(2)}',
+            Text('RM ${estimatedValue.toStringAsFixed(2)}',
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppTheme.paprika)),
             const Text('Estimated', style: TextStyle(fontSize: 11, color: AppTheme.paprika, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
@@ -433,13 +433,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
               'This is an estimate based on current market prices and input from users.',
               style: TextStyle(fontSize: 10.5, color: Colors.grey),
             ),
-            if (result.hasExclusions) ...[
-              const SizedBox(height: 4),
-              Text(
-                '${result.excludedCount} item${result.excludedCount == 1 ? '' : 's'} not included — no price available.',
-                style: const TextStyle(fontSize: 10.5, color: AppTheme.paprika, fontWeight: FontWeight.w600),
-              ),
-            ],
           ],
         ),
       ),
