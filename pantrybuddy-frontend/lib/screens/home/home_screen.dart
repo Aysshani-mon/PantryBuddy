@@ -24,7 +24,10 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final tabs = [
-      HomeOverviewTab(appState: widget.appState),
+      HomeOverviewTab(
+        appState: widget.appState,
+        onViewInventory: () => setState(() => _index = 1),
+      ),
       InventoryListScreen(appState: widget.appState),
       RemindersScreen(appState: widget.appState),
       ProgressScreen(appState: widget.appState),

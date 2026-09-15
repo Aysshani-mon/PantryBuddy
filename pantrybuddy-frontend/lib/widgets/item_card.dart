@@ -25,6 +25,18 @@ class ItemCard extends StatelessWidget {
     }
   }
 
+  /// Storage-location accent color for the badge below the item name.
+  Color get _storageColor {
+    switch (item.storageLocation) {
+      case StorageLocation.fridge:
+        return Colors.blue;
+      case StorageLocation.freezer:
+        return Colors.cyan;
+      case StorageLocation.pantry:
+        return Colors.amber.shade800;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = urgencyColor(item.daysLeft);
@@ -57,13 +69,33 @@ class ItemCard extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15.5, color: AppTheme.ink)),
                             const SizedBox(height: 4),
-                            Row(
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
-                                Icon(_storageIcon, size: 13, color: Colors.grey.shade500),
-                                const SizedBox(width: 4),
                                 Text(
-                                  '${_formatQty(item.quantity)} ${item.unit} • ${item.storageLocation.label}',
+                                  '${_formatQty(item.quantity)} ${item.unit}',
                                   style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _storageColor.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: _storageColor.withValues(alpha: 0.4)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(_storageIcon, size: 14, color: _storageColor),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        item.storageLocation.label,
+                                        style: TextStyle(color: _storageColor, fontSize: 12, fontWeight: FontWeight.w600),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),

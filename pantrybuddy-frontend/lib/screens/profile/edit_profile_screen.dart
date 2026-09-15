@@ -72,6 +72,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
+                    // Changed color of Save Changes button for better visibility.
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    // Yola
+
                     onPressed: _submitting ? null : _submit,
                     child: _submitting
                         ? const SizedBox(

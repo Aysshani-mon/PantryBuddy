@@ -398,18 +398,24 @@ class AppState extends ChangeNotifier {
     if (!isPartialConsumption) {
       item.disposition = disposition;
       item.resolvedAt = DateTime.now();
+      item.resolvedByUserId = currentUser!.id;
     }
     item.discardReason = discardReason;
     item.consumedAmount = consumedAmount;
     await inventoryRepo.updateItem(item);
     await _refreshItemsNow(); // instant feedback instead of waiting for the next poll tick
     if (!isPartialConsumption) {
+      final action = switch (disposition) {
+        ItemDisposition.consumed => ActivityAction.consumed,
+        ItemDisposition.discarded => ActivityAction.discarded,
+        ItemDisposition.donated => ActivityAction.donated,
+      };
       await activityRepo.logActivity(ActivityLogEntry(
         id: IdService.newId('log'),
         householdId: currentHousehold!.id,
         actingUserId: currentUser!.id,
         actingUserName: currentUser!.name,
-        action: ActivityAction.resolved,
+        action: action,
         itemName: item.name,
       ));
     }

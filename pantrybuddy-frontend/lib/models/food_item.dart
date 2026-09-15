@@ -204,6 +204,12 @@ class FoodItem {
   final String addedByUserId;
   ItemDisposition? disposition; // null while still active in the inventory (IN_STOCK)
   DateTime? resolvedAt;
+  /// Who actually performed the consume/discard/donate action — distinct
+  /// from [addedByUserId] (whoever originally added it). Null until
+  /// resolved. Personal ("My Stats") consumed/wasted counts must filter
+  /// on this, not addedByUserId — otherwise a housemate eating something
+  /// you added would count as your consumption, not theirs.
+  String? resolvedByUserId;
   /// Optional free-text note — e.g. "half a bag left" for a large packet
   /// bought once but used gradually. Shown on the item card and detail
   /// screen; editable any time via the Edit Item screen.
@@ -235,6 +241,7 @@ class FoodItem {
     DateTime? addedAt,
     this.disposition,
     this.resolvedAt,
+    this.resolvedByUserId,
     this.notes,
     this.discardReason,
     this.consumedAmount,

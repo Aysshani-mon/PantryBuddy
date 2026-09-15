@@ -12,6 +12,11 @@ import '../../utils/unit_options.dart';
 import 'barcode_scan_screen.dart';
 import 'photo_scan_screen.dart';
 import '../../models/recognition_candidate.dart';
+import '../../theme/app_theme.dart';
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
+}
 
 /// AC 2.1.1 — manual entry: name, quantity, storage location, expiry date.
 /// AC 3.1.1 / AC 3.1.2 — optionally set an expiry reminder while adding.
@@ -32,6 +37,11 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
   final _notesController = TextEditingController();
   final _priceController = TextEditingController();
   final _customLeadTimeController = TextEditingController();
+
+  /// AC (new) — duplicate detection: the active item this matches by
+  /// name, if any (excluding itself when editing). Recomputed live as
+  /// the user types, so the warning appears/disappears immediately.
+  FoodItem? _duplicateMatch;
 
   /// Options shown in the unit dropdown — normally just [kUnitOptions],
   /// but gains an extra entry if editing an item whose existing unit
@@ -98,13 +108,34 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
       _unit = kUnitOptions.first; // sensible default for a new item: 'pcs'
     }
     _nameController.addListener(_scheduleSuggestionFetch);
+    _nameController.addListener(_checkForDuplicate);
     _scheduleSuggestionFetch();
+    _checkForDuplicate();
+  }
+
+  /// Live duplicate check — case-insensitive, trimmed, against active
+  /// (in-stock) items only in the current household. Doesn't block
+  /// typing; just surfaces a warning banner. Submit additionally gates
+  /// behind a confirmation dialog if this is still set (see _submit).
+  void _checkForDuplicate() {
+    final name = _nameController.text.trim().toLowerCase();
+    if (name.isEmpty) {
+      if (_duplicateMatch != null) setState(() => _duplicateMatch = null);
+      return;
+    }
+    final match = widget.appState.activeItems
+        .where((i) => i.id != widget.existingItem?.id && i.name.trim().toLowerCase() == name)
+        .firstOrNull;
+    if (match?.id != _duplicateMatch?.id) {
+      setState(() => _duplicateMatch = match);
+    }
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
     _nameController.removeListener(_scheduleSuggestionFetch);
+    _nameController.removeListener(_checkForDuplicate);
     _nameController.dispose();
     _quantityController.dispose();
     _notesController.dispose();
@@ -114,6 +145,29 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
   }
 
   String _formatQty(double q) => q == q.roundToDouble() ? q.toInt().toString() : q.toString();
+
+  Widget _buildDuplicateWarning(FoodItem match) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppTheme.honeyLight,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppTheme.honey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'You already have "${match.name}" — ${_formatQty(match.quantity)} ${match.unit} in ${match.storageLocation.label}.',
+              style: const TextStyle(fontSize: 12.5, color: AppTheme.ink),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// Debounced so a real lookup doesn't fire on every single keystroke —
   /// waits half a second after the user stops typing/changing fields.
@@ -222,7 +276,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
   /// 4.4) — this only ever sets fields, never calls addItem.
   Future<void> _scanBarcode() async {
     final result = await Navigator.of(context).push<ScannedProduct>(
-      MaterialPageRoute(builder: (_) => const BarcodeScanScreen()),
+      MaterialPageRoute(builder: (_) => BarcodeScanScreen(appState: widget.appState)),
     );
     if (result == null || !mounted) return;
 
@@ -295,6 +349,23 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
     final formValid = _formKey.currentState!.validate();
     if (!formValid || _location == null || _category == null || _useByDate == null || _unit == null) {
       return;
+    }
+
+    if (!_isEditing && _duplicateMatch != null) {
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Already in your inventory'),
+          content: Text(
+            'You already have "${_duplicateMatch!.name}" — ${_formatQty(_duplicateMatch!.quantity)} ${_duplicateMatch!.unit} in ${_duplicateMatch!.storageLocation.label}. Add another anyway?',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add anyway')),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
     }
 
     if (_wantsReminder) {
@@ -385,6 +456,10 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
                   autofocus: !_isEditing,
                   validator: ValidatedTextField.required('the item name'),
                 ),
+                if (_duplicateMatch != null) ...[
+                  const SizedBox(height: 8),
+                  _buildDuplicateWarning(_duplicateMatch!),
+                ],
                 const SizedBox(height: 16),
                 Row(
                   children: [

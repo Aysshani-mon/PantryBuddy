@@ -63,26 +63,34 @@ class InsightsService {
   static Iterable<FoodItem> _scoped(List<FoodItem> items, String? userId) =>
       userId == null ? items : items.where((i) => i.addedByUserId == userId);
 
+  /// Scopes by who actually RESOLVED (consumed/discarded/donated) an
+  /// item, not who added it — this is what personal consumed/wasted
+  /// stats must use, or a housemate eating something you added would
+  /// count as your consumption instead of theirs.
+  static Iterable<FoodItem> _scopedByResolver(List<FoodItem> items, String? userId) =>
+      userId == null ? items : items.where((i) => i.resolvedByUserId == userId);
+
   // ==================== 5.1 / 5.2 — period summary ====================
 
   /// [userId] null = whole household (5.2); non-null = just that member's
   /// own added items (5.1 — "my contribution").
   static PeriodSummary summarize(List<FoodItem> allItems, DateRange range, {String? userId}) {
-    final scoped = _scoped(allItems, userId);
+    final resolved = _scopedByResolver(allItems, userId);
+    final added = _scoped(allItems, userId);
 
-    final consumed = scoped.where((i) =>
+    final consumed = resolved.where((i) =>
         i.disposition == ItemDisposition.consumed &&
         i.resolvedAt != null &&
         range.contains(i.resolvedAt!)).length;
-    final wasted = scoped.where((i) =>
+    final wasted = resolved.where((i) =>
         i.disposition == ItemDisposition.discarded &&
         i.resolvedAt != null &&
         range.contains(i.resolvedAt!)).length;
-    final donated = scoped.where((i) =>
+    final donated = resolved.where((i) =>
         i.disposition == ItemDisposition.donated &&
         i.resolvedAt != null &&
         range.contains(i.resolvedAt!)).length;
-    final stored = scoped.where((i) => _activeAt(i, range.end)).length;
+    final stored = added.where((i) => _activeAt(i, range.end)).length;
 
     final score = calculateScore(consumed: consumed, wasted: wasted, donated: donated);
 
@@ -90,11 +98,11 @@ class InsightsService {
       range.start.subtract(range.end.difference(range.start) + const Duration(days: 1)),
       range.start.subtract(const Duration(milliseconds: 1)),
     );
-    final prevConsumed = scoped.where((i) =>
+    final prevConsumed = resolved.where((i) =>
         i.disposition == ItemDisposition.consumed && i.resolvedAt != null && prevRange.contains(i.resolvedAt!)).length;
-    final prevWasted = scoped.where((i) =>
+    final prevWasted = resolved.where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && prevRange.contains(i.resolvedAt!)).length;
-    final prevDonated = scoped.where((i) =>
+    final prevDonated = resolved.where((i) =>
         i.disposition == ItemDisposition.donated && i.resolvedAt != null && prevRange.contains(i.resolvedAt!)).length;
     final hasPrevData = prevConsumed + prevWasted + prevDonated > 0;
 
@@ -123,7 +131,8 @@ class InsightsService {
   /// as a real, plotted zero; a day that hasn't happened yet is simply
   /// never generated as a point at all (not "zero", not plotted).
   static List<TrendPoint> trend(List<FoodItem> allItems, DateRange range, {String? userId}) {
-    final scoped = _scoped(allItems, userId).toList();
+    final resolved = _scopedByResolver(allItems, userId).toList();
+    final added = _scoped(allItems, userId).toList();
     final points = <TrendPoint>[];
     var day = DateTime(range.start.year, range.start.month, range.start.day);
     final today = DateTime.now();
@@ -133,15 +142,15 @@ class InsightsService {
 
     while (!day.isAfter(lastPlottableDay)) {
       final dayEnd = DateTime(day.year, day.month, day.day, 23, 59, 59, 999);
-      final consumed = scoped.where((i) =>
+      final consumed = resolved.where((i) =>
           i.disposition == ItemDisposition.consumed &&
           i.resolvedAt != null &&
           i.resolvedAt!.year == day.year && i.resolvedAt!.month == day.month && i.resolvedAt!.day == day.day).length;
-      final wasted = scoped.where((i) =>
+      final wasted = resolved.where((i) =>
           i.disposition == ItemDisposition.discarded &&
           i.resolvedAt != null &&
           i.resolvedAt!.year == day.year && i.resolvedAt!.month == day.month && i.resolvedAt!.day == day.day).length;
-      final stored = scoped.where((i) => _activeAt(i, dayEnd)).length;
+      final stored = added.where((i) => _activeAt(i, dayEnd)).length;
       points.add(TrendPoint(date: day, consumed: consumed, wasted: wasted, stored: stored));
       day = day.add(const Duration(days: 1));
     }
@@ -151,7 +160,7 @@ class InsightsService {
   // ==================== Category breakdown (wasted items) ====================
 
   static List<CategoryWasteCount> categoryBreakdown(List<FoodItem> allItems, DateRange range, {String? userId}) {
-    final scoped = _scoped(allItems, userId).where((i) =>
+    final scoped = _scopedByResolver(allItems, userId).where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!));
     final counts = <ProductCategory, int>{};
     for (final item in scoped) {
@@ -305,7 +314,7 @@ class InsightsService {
   /// Breakdown by the user's own stated DiscardReason. [userId] null =
   /// household-wide; non-null = just that member's own added items.
   static List<DiscardReasonCount> discardReasonBreakdown(List<FoodItem> allItems, DateRange range, {String? userId}) {
-    final wasted = _scoped(allItems, userId).where((i) =>
+    final wasted = _scopedByResolver(allItems, userId).where((i) =>
         i.disposition == ItemDisposition.discarded &&
         i.resolvedAt != null &&
         range.contains(i.resolvedAt!) &&

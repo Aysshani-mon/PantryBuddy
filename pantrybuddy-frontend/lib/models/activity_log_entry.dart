@@ -1,7 +1,7 @@
 /// One row in the household's shared "Recent Activity" feed.
 ///
 /// Epic 3 — AC 3.7.1
-enum ActivityAction { added, edited, removed, resolved, joined }
+enum ActivityAction { added, edited, removed, consumed, discarded, donated, joined }
 
 class ActivityLogEntry {
   final String id;
@@ -30,8 +30,12 @@ class ActivityLogEntry {
         return '$actingUserName updated $itemName';
       case ActivityAction.removed:
         return '$actingUserName removed $itemName';
-      case ActivityAction.resolved:
-        return '$actingUserName marked $itemName as done';
+      case ActivityAction.consumed:
+        return '$actingUserName marked $itemName as consumed';
+      case ActivityAction.discarded:
+        return '$actingUserName marked $itemName as discarded';
+      case ActivityAction.donated:
+        return '$actingUserName marked $itemName as donated';
       case ActivityAction.joined:
         return '$actingUserName joined the household';
     }

@@ -36,11 +36,19 @@ class InviteScreen extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    Text('INVITE CODE', style: TextStyle(color: Colors.grey.shade700, fontSize: 12, letterSpacing: 1)),
+                    Text(
+                      'INVITE CODE', 
+                      style: TextStyle(
+                        color: Colors.grey.shade700, 
+                        fontSize: 14, 
+                        letterSpacing: 1,
+                        fontWeight: FontWeight.w600,
+                        )
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       household?.id ?? '',
-                      style: const TextStyle(fontSize: 36, fontWeight: FontWeight.w800, letterSpacing: 2),
+                      style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w800, letterSpacing: 2),
                     ),
                   ],
                 ),

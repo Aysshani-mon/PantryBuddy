@@ -32,12 +32,13 @@ router.get('/households/:householdId/activity', asyncHandler(async (req, res) =>
     [req.params.householdId]
   );
 
+  const actionMap = { ADD: 'added', CONSUME: 'consumed', DISCARD: 'discarded', DONATE: 'donated' };
   const txnEntries = txnRows.map((row) => ({
     id: `txn-${row.transaction_id}`,
     householdId: String(req.params.householdId),
     actingUserId: String(row.user_id),
     actingUserName: row.display_name,
-    action: row.transaction_type === 'ADD' ? 'added' : 'resolved',
+    action: actionMap[row.transaction_type] ?? 'added',
     itemName: row.product_name,
     timestamp: row.transaction_time,
   }));

@@ -111,6 +111,16 @@ class _SignInScreenState extends State<SignInScreen> {
                 ],
                 const SizedBox(height: 16),
                 ElevatedButton(
+                  // Changed color of Sign in button for better visibility.
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color.fromARGB(255, 34, 142, 38),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  // Yola
+                  
                   onPressed: _submitting ? null : _submit,
                   child: _submitting
                       ? const SizedBox(

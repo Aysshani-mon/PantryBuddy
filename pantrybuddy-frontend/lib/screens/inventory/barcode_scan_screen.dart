@@ -2,15 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../models/scanned_product.dart';
-import '../../services/product_lookup_service.dart';
+import '../../services/category_defaults_service.dart';
+import '../../state/app_state.dart';
 
-/// User Story 4.1 — scans a product barcode and looks it up against Open
-/// Food Facts. Pops with a [ScannedProduct] on success so the caller (Add
-/// Item screen) can pre-fill its form — the user still reviews/edits
-/// everything there before it's saved (AC 4.4). Pops with null if the
-/// user backs out or chooses to enter the item manually instead.
+/// User Story 4.1 — scans a product barcode, resolved server-side via
+/// Open Food Facts + the product_keyword_mapping table (same recognition
+/// pipeline as photo scanning), so a real category comes back whenever
+/// one can be resolved. Pops with a [ScannedProduct] on success so the
+/// caller (Add Item screen) can pre-fill its form — the user still
+/// reviews/edits everything there before it's saved (AC 4.4). Pops with
+/// null if the user backs out or chooses to enter the item manually.
 class BarcodeScanScreen extends StatefulWidget {
-  const BarcodeScanScreen({super.key});
+  const BarcodeScanScreen({super.key, required this.appState});
+  final AppState appState;
 
   @override
   State<BarcodeScanScreen> createState() => _BarcodeScanScreenState();
@@ -41,24 +45,40 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   bool _busy = false; // true while a detected code is being looked up
   bool _showManualEntry = false;
   String? _statusMessage;
-
-  // Debug instrumentation — temporary, remove once scanning is confirmed
-  // working reliably. Lets us tell "camera + detector never actually ran a
-  // frame" apart from "it's running but not finding anything in frame",
-  // which look identical to the user otherwise (camera on, nothing happens
-  // either way).
-  int _framesAnalyzed = 0;
   String? _engineError;
+  bool _exited = false; // guards against stopping/popping more than once
 
   @override
   void dispose() {
+    // Fire-and-forget fallback only — the real, reliable stop happens in
+    // _exit() before every pop (see below). mobile_scanner's dispose() is
+    // async as of 7.x, but State.dispose() can't be awaited, so this
+    // alone isn't guaranteed to finish before the route is gone; _exit()
+    // is what actually fixes the "camera stays on" issue.
     _controller.dispose();
     _manualCodeController.dispose();
     super.dispose();
   }
 
+  /// The ONLY path that should ever close this screen — guarantees the
+  /// camera is actually stopped first. Handles the system back
+  /// gesture/AppBar back button (via PopScope below) as well as every
+  /// explicit pop in this file, so there's no route out of this screen
+  /// that skips releasing the camera.
+  Future<void> _exit([ScannedProduct? result]) async {
+    if (_exited) return;
+    _exited = true;
+    try {
+      await _controller.stop();
+    } catch (_) {
+      // Already stopped/disposed, or never started — fine either way,
+      // we're exiting regardless.
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop(result);
+  }
+
   Future<void> _onDetect(BarcodeCapture capture) async {
-    setState(() => _framesAnalyzed++);
     if (_busy) return;
     final code = capture.barcodes.firstOrNull?.rawValue;
     if (code == null || code.isEmpty) return;
@@ -70,12 +90,14 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       _busy = true;
       _statusMessage = null;
     });
+    // AC 4.1.6 — pause further detection while looking this one up.
     await _controller.stop();
 
     try {
-      final product = await ProductLookupService.lookup(barcode);
+      final result = await widget.appState.recognitionRepo.recognizeBarcode(barcode);
       if (!mounted) return;
-      if (product == null) {
+
+      if (result.productName == null) {
         setState(() {
           _busy = false;
           _statusMessage = 'No match found for barcode $barcode — try again, or enter the item manually.';
@@ -83,12 +105,20 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
         await _controller.start();
         return;
       }
-      Navigator.of(context).pop(product);
-    } on ProductLookupException catch (e) {
+
+      final category = result.candidates.isNotEmpty ? result.candidates.first.category : null;
+      await _exit(ScannedProduct(
+        barcode: barcode,
+        name: result.productName!,
+        category: category,
+        suggestedLocation: CategoryDefaultsService.suggestLocation(category),
+        brand: result.brand,
+      ));
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _statusMessage = e.message;
+        _statusMessage = 'Product lookup failed: $e';
       });
       await _controller.start();
     }
@@ -96,106 +126,118 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Scan barcode'),
-        actions: [
-          IconButton(
-            tooltip: 'Enter barcode manually',
-            icon: Icon(_showManualEntry ? Icons.camera_alt_outlined : Icons.keyboard_outlined),
-            onPressed: () => setState(() => _showManualEntry = !_showManualEntry),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (!_showManualEntry)
-                    MobileScanner(
-                      controller: _controller,
-                      onDetect: _onDetect,
-                      errorBuilder: (context, error) {
-                        // Surfaces camera/permission/detector init failures
-                        // that would otherwise fail silently.
-                        final message = error.errorDetails?.message ?? error.errorCode.name;
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted) setState(() => _engineError = message);
-                        });
-                        return Container(
-                          color: Colors.black87,
-                          alignment: Alignment.center,
-                          padding: const EdgeInsets.all(24),
-                          child: Text(
-                            'Camera error (${error.errorCode.name}): $message',
-                            style: const TextStyle(color: Colors.white),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _exit();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Scan barcode'),
+          leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => _exit()),
+          actions: [
+            IconButton(
+              tooltip: 'Enter barcode manually',
+              icon: Icon(_showManualEntry ? Icons.camera_alt_outlined : Icons.keyboard_outlined),
+              onPressed: () => setState(() => _showManualEntry = !_showManualEntry),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (!_showManualEntry)
+                      MobileScanner(
+                        controller: _controller,
+                        onDetect: _onDetect,
+                        errorBuilder: (context, error) {
+                          // AC 4.1.4 — camera access denied/unavailable.
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) setState(() => _engineError = error.errorCode.name);
+                          });
+                          return Container(
+                            color: Colors.black87,
+                            alignment: Alignment.center,
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              'Camera error (${error.errorCode.name}). Allow camera access or enter the item manually.',
+                              style: const TextStyle(color: Colors.white),
+                              textAlign: TextAlign.center,
+                            ),
+                          );
+                        },
+                      )
+                    else
+                      _buildManualEntry(),
+                    if (!_showManualEntry) _buildScanOverlay(),
+                    // AC 4.1.5 — guidance while scanning with nothing
+                    // detected yet.
+                    if (!_showManualEntry && _engineError == null)
+                      Positioned(
+                        bottom: 12,
+                        left: 12,
+                        right: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'Position the barcode inside the frame and ensure good lighting.',
+                            style: TextStyle(color: Colors.white, fontSize: 12),
                             textAlign: TextAlign.center,
                           ),
-                        );
-                      },
-                    )
-                  else
-                    _buildManualEntry(),
-                  if (!_showManualEntry) _buildScanOverlay(),
-                  if (!_showManualEntry)
-                    Positioned(
-                      bottom: 12,
-                      left: 12,
-                      right: 12,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _engineError != null
-                              ? 'Detector error: $_engineError'
-                              : _framesAnalyzed == 0
-                                  ? 'Starting scanner... (if this never changes, the detector isn\'t initializing)'
-                                  : 'Scanning — $_framesAnalyzed frame(s) analyzed, no barcode found yet',
-                          style: const TextStyle(color: Colors.white, fontSize: 11),
-                          textAlign: TextAlign.center,
                         ),
                       ),
-                    ),
-                  if (_busy)
-                    Container(
-                      color: Colors.black54,
-                      child: const Center(
-                        child: CircularProgressIndicator(color: Colors.white),
+                    // AC 4.1.6 — loading feedback while a detected code is
+                    // being looked up.
+                    if (_busy)
+                      Container(
+                        color: Colors.black54,
+                        child: const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(color: Colors.white),
+                              SizedBox(height: 12),
+                              Text('Looking up product...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                ],
-              ),
-            ),
-            if (_statusMessage != null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                color: Colors.orange.shade50,
-                child: Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.orange.shade800, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(_statusMessage!,
-                          style: TextStyle(color: Colors.orange.shade900, fontSize: 13)),
-                    ),
                   ],
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(null),
-                child: const Text('Enter item manually instead'),
+              if (_statusMessage != null)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  color: Colors.orange.shade50,
+                  child: Row(
+                    children: [
+                      Icon(Icons.info_outline, color: Colors.orange.shade800, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(_statusMessage!,
+                            style: TextStyle(color: Colors.orange.shade900, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: OutlinedButton(
+                  onPressed: () => _exit(),
+                  child: const Text('Enter item manually instead'),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

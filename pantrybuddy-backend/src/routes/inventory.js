@@ -9,7 +9,11 @@ const router = express.Router();
 
 const ITEM_SELECT = `
   SELECT ii.*, p.product_name, pc.category_name, st.storage_name,
-         pir.median_package_price AS public_estimated_price
+         pir.median_package_price AS public_estimated_price,
+         (SELECT it.user_id FROM inventory_transactions it
+            WHERE it.inventory_item_id = ii.inventory_item_id
+              AND it.transaction_type IN ('CONSUME', 'DISCARD', 'DONATE')
+            ORDER BY it.transaction_time DESC LIMIT 1) AS resolved_by_user_id
   FROM inventory_items ii
   JOIN products p ON p.product_id = ii.product_id
   JOIN product_categories pc ON pc.category_id = p.category_id
@@ -41,6 +45,14 @@ function itemRowToJson(row) {
     useByDate: row.expiry_date,
     addedAt: row.entry_date,
     addedByUserId: String(row.created_by),
+    // Who actually performed the consume/discard/donate action — distinct
+    // from addedByUserId (whoever originally added it). Null until the
+    // item is resolved. This is what "My Stats" consumed/wasted counts
+    // should filter on — NOT addedByUserId, which only tells you who
+    // bought/added it, not who ate or threw it out.
+    resolvedByUserId: row.resolved_by_user_id !== null && row.resolved_by_user_id !== undefined
+      ? String(row.resolved_by_user_id)
+      : null,
     // status stays IN_STOCK for a partially/half-consumed item — only a
     // FULLY resolved item (fully consumed, discarded, donated) has a
     // disposition. consumedAmount can be present even while disposition

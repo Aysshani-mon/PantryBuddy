@@ -164,6 +164,7 @@ class ApiDataStore
             ? null
             : ItemDisposition.values.byName(json['disposition'] as String),
         resolvedAt: json['resolvedAt'] == null ? null : DateTime.parse(json['resolvedAt'] as String),
+        resolvedByUserId: json['resolvedByUserId'] as String?,
         discardReason: DiscardReasonLabel.fromApiValue(json['discardReason'] as String?),
         consumedAmount: ConsumedAmountLabel.fromApiValue(json['consumedAmount'] as String?),
         price: (json['price'] as num?)?.toDouble(),
