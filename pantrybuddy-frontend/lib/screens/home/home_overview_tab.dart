@@ -107,7 +107,7 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppLogo(markSize: 150, direction: Axis.horizontal),
+          const AppLogo(markSize: 200, direction: Axis.horizontal),
           const SizedBox(height: 16),
           Material(
             color: AppTheme.seedColor,

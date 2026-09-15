@@ -581,7 +581,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
           child: OutlinedButton.icon(
             onPressed: _scanPhoto,
             icon: const Icon(Icons.camera_alt_outlined, size: 19),
-            label: const Text('Scan photo'),
+            label: const Text('Take photo'),
           ),
         ),
       ],

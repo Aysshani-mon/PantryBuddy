@@ -214,9 +214,21 @@ router.post('/recognize/image', asyncHandler(async (req, res) => {
     throw new ApiError(502, `Google Vision request failed: ${e.message}`);
   }
 
+  // Vision returns labels sorted by its own confidence, highest first.
+  // Previously all labels were matched in one batch, which surfaced
+  // near-duplicate results (e.g. "Banana", "Bananas", "Fruits" all at
+  // once, from three different keyword rows). Now: walk labels in
+  // confidence order and stop at the first one that resolves to
+  // anything, returning only its single best match — one clean answer,
+  // not a redundant list.
   const labels = (result.labelAnnotations || []).map((a) => ({ label: a.description, score: a.score }));
-  const candidates = await resolveByKeywords(labels.map((l) => l.label), 'TEXT');
-  res.json({ labels, candidates });
+  let candidates = [];
+  for (const l of labels) {
+    candidates = await resolveByKeywords([l.label], 'TEXT');
+    if (candidates.length > 0) break;
+  }
+  const best = candidates.length > 0 ? [candidates[0]] : [];
+  res.json({ labels, candidates: best });
 }));
 
 // ==================== OCR is intentionally NOT a server route ====================

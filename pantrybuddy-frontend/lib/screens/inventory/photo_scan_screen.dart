@@ -116,7 +116,7 @@ class _PhotoScanScreenState extends State<PhotoScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Scan photo')),
+      appBar: AppBar(title: const Text('Take photo')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -181,23 +181,37 @@ class _PhotoScanScreenState extends State<PhotoScanScreen> {
                   child: Text(_error!, style: TextStyle(color: Colors.orange.shade800)),
                 ),
               if (_candidates.isNotEmpty) ...[
-                const Text('Is this what you scanned?', style: TextStyle(fontWeight: FontWeight.w700)),
+                const Text('Is this what you photographed?', style: TextStyle(fontWeight: FontWeight.w700)),
                 const SizedBox(height: 8),
-                Expanded(
-                  child: ListView.separated(
-                    itemCount: _candidates.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, i) {
-                      final c = _candidates[i];
-                      return Card(
-                        child: ListTile(
-                          title: Text(c.productName, style: const TextStyle(fontWeight: FontWeight.w600)),
-                          subtitle: Text('${c.categoryName} · matched "${c.matchedKeyword}"'),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: _busy ? null : () => Navigator.of(context).pop(c),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_candidates.first.productName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                        const SizedBox(height: 2),
+                        Text(_candidates.first.categoryName, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                        const SizedBox(height: 14),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _busy ? null : () => setState(() => _candidates = []),
+                                child: const Text('Not this'),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _busy ? null : () => Navigator.of(context).pop(_candidates.first),
+                                child: const Text('Confirm'),
+                              ),
+                            ),
+                          ],
                         ),
-                      );
-                    },
+                      ],
+                    ),
                   ),
                 ),
               ],

@@ -26,21 +26,14 @@ const _categoryEmoji = <ProductCategory, String>{
   ProductCategory.eggs: '🥚',
 };
 
-/// Epic 5 — Progress tab.
-/// Both views ("My Stats" and "Household") share the exact same card
-/// layout (stat cards, trend, category breakdown, estimated value,
-/// suggestion) — the only difference is the data scope (userId filter).
-/// Household additionally gets a "why food was wasted" breakdown, using
-/// the app's real DiscardReason data.
+/// Epic 5 — Progress tab. Household-wide insights only (the personal
+/// "My Stats" view was removed per mentor feedback — not necessary).
 ///
-/// 5.1 — My Stats view.
-/// 5.2 — Household view (scope only; the buying-frequency angle from the
-/// original story is intentionally not built as a separate feature here —
-/// see chat for why).
-/// 5.3 — the trend chart, present in both views.
-/// 5.4 — the suggestion card, present in both views.
-/// 5.5 — estimated value card (placeholder pricing — see
-/// PriceEstimateService; database team's CSV isn't ready yet).
+/// 5.2 — Household view.
+/// 5.3 — the trend chart.
+/// 5.4 — the suggestion cards (forward-looking action tips +
+/// reason-based recommended changes).
+/// 5.5 — estimated value card.
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key, required this.appState});
   final AppState appState;
@@ -52,7 +45,6 @@ class ProgressScreen extends StatefulWidget {
 class _ProgressScreenState extends State<ProgressScreen> {
   InsightsPeriod _period = InsightsPeriod.weekly;
   DateTime _anchor = DateTime.now();
-  bool _householdView = false;
 
   @override
   Widget build(BuildContext context) {
@@ -63,20 +55,17 @@ class _ProgressScreenState extends State<ProgressScreen> {
           builder: (context, _) {
             final state = widget.appState;
             final range = InsightsService.rangeFor(_period, _anchor);
-            final userId = _householdView ? null : state.currentUser?.id;
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
               children: [
                 _buildHeader(),
                 const SizedBox(height: 16),
-                _buildViewToggle(),
-                const SizedBox(height: 16),
                 _buildPeriodToggle(),
                 const SizedBox(height: 12),
                 _buildRangeNav(range),
                 const SizedBox(height: 16),
-                ..._buildStatsSection(state, range, userId, isHousehold: _householdView),
+                ..._buildStatsSection(state, range),
               ],
             );
           },
@@ -107,17 +96,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
           child: const Icon(Icons.eco_outlined, color: AppTheme.seedColor),
         ),
       ],
-    );
-  }
-
-  Widget _buildViewToggle() {
-    return SegmentedButton<bool>(
-      segments: const [
-        ButtonSegment(value: false, label: Text('My Stats')),
-        ButtonSegment(value: true, label: Text('Household')),
-      ],
-      selected: {_householdView},
-      onSelectionChanged: (s) => setState(() => _householdView = s.first),
     );
   }
 
@@ -169,37 +147,20 @@ class _ProgressScreenState extends State<ProgressScreen> {
     );
   }
 
-  // ==================== My Stats + Household sections ====================
+  // ==================== Household stats section ====================
 
-  List<Widget> _buildStatsSection(AppState state, DateRange range, String? userId, {required bool isHousehold}) {
+  List<Widget> _buildStatsSection(AppState state, DateRange range) {
     final items = state.items;
-    final summary = InsightsService.summarize(items, range, userId: userId);
-    final trend = InsightsService.trend(items, range, userId: userId);
-
-    if (!isHousehold) {
-      // My Stats: stat cards (unchanged) + trend + "Your contribution"
-      // (replaces the comparison/breakdown/estimate/suggestion cards).
-      final household = InsightsService.summarize(items, range, userId: null);
-      final addedCount = items.where((i) => i.addedByUserId == userId && range.contains(i.addedAt)).length;
-      return [
-        _buildStatCardsRow(summary),
-        const SizedBox(height: 16),
-        _buildTrendCard(trend),
-        const SizedBox(height: 16),
-        _buildYourContributionCard(state, summary, household, addedCount),
-      ];
-    }
-
-    // Household: unchanged from before (trend just no longer plots Stored,
-    // handled globally in TrendChart).
-    final breakdown = InsightsService.categoryBreakdown(items, range, userId: userId);
-    final reasonBreakdown = InsightsService.discardReasonBreakdown(items, range, userId: userId);
+    final summary = InsightsService.summarize(items, range);
+    final trend = InsightsService.trend(items, range);
+    final breakdown = InsightsService.categoryBreakdown(items, range);
+    final reasonBreakdown = InsightsService.discardReasonBreakdown(items, range);
     final recommendedChanges = InsightsService.generateRecommendedChanges(
       breakdown.isEmpty ? [const CategoryWasteCount(ProductCategory.shelfStableFoods, 0)] : breakdown,
       summary,
       reasonBreakdown: reasonBreakdown,
     );
-    final actionTips = InsightsService.generateActionTips(items, userId: userId);
+    final actionTips = InsightsService.generateActionTips(items);
     final wastedItems = items.where((i) =>
         i.disposition == ItemDisposition.discarded && i.resolvedAt != null && range.contains(i.resolvedAt!)).toList();
     final estimatedValue = PriceEstimateService.estimateValue(wastedItems);
@@ -226,49 +187,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
       const SizedBox(height: 16),
       _buildRecommendedChangesCard(recommendedChanges),
     ];
-  }
-
-  /// User's share of the household's consumed/wasted items this period —
-  /// replaces the score/breakdown/estimate/suggestion cards on My Stats.
-  Widget _buildYourContributionCard(AppState state, PeriodSummary mine, PeriodSummary household, int addedCount) {
-    final consumedPct = household.consumed == 0 ? 0 : ((mine.consumed / household.consumed) * 100).round();
-    final wastedPct = household.wasted == 0 ? 0 : ((mine.wasted / household.wasted) * 100).round();
-    final name = state.currentUser?.name.trim() ?? '';
-    final initials = name.isEmpty
-        ? '?'
-        : name.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).take(2).map((w) => w[0].toUpperCase()).join();
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: AppTheme.heroFill(AppTheme.seedColor),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
-                child: Text(initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13)),
-              ),
-              const SizedBox(width: 12),
-              const Text('Your contribution', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text('$consumedPct% of household food consumed',
-              style: AppTheme.statNumberStyle.copyWith(fontSize: 21, color: Colors.white)),
-          const SizedBox(height: 6),
-          Text('$wastedPct% of household food wasted',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white.withValues(alpha: 0.85))),
-          const SizedBox(height: 12),
-          Text(
-            '${mine.consumed} item${mine.consumed == 1 ? '' : 's'} used • $addedCount added • ${mine.wasted} discarded',
-            style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontSize: 12.5),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildStatCardsRow(PeriodSummary summary) {
