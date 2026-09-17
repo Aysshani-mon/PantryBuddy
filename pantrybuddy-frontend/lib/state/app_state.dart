@@ -88,7 +88,25 @@ class AppState extends ChangeNotifier {
   /// and shows the message inline.
   Future<void> signIn({required String email, required String password}) async {
     currentUser = await userRepo.signIn(email: email, password: password);
+    await _afterAuthSuccess();
+  }
 
+  /// "Stay logged in" — called once at app startup (see main.dart).
+  /// Returns true if a saved session was successfully restored (in which
+  /// case currentUser/currentHousehold etc. are already populated, same
+  /// as after a normal sign-in) — false if there was nothing to restore,
+  /// or it didn't work, in which case the normal sign-in screen shows.
+  Future<bool> tryRestoreSession() async {
+    final user = await userRepo.restoreSession();
+    if (user == null) return false;
+    currentUser = user;
+    await _afterAuthSuccess();
+    return true;
+  }
+
+  /// Shared by signIn and tryRestoreSession — looks up the household (or
+  /// pending join request) for whichever user was just authenticated.
+  Future<void> _afterAuthSuccess() async {
     final household = await householdRepo.getHouseholdForUser(currentUser!.id);
     if (household != null) {
       currentUser = currentUser!.copyWith(householdId: household.id);
@@ -379,6 +397,7 @@ class AppState extends ChangeNotifier {
       action: ActivityAction.edited,
       itemName: item.name,
     ));
+    notifyListeners();
   }
 
   /// Consume / discard — resolves the item out of the active inventory.
@@ -479,6 +498,15 @@ class AppState extends ChangeNotifier {
       wasCustomLeadTime: wasCustom,
     );
     await reminderRepo.setReminder(reminder);
+    reminders = await reminderRepo.getRemindersForHousehold(currentHousehold!.id);
+    notifyListeners();
+  }
+
+  /// Cancels an existing reminder — e.g. when a user turns the reminder
+  /// toggle off while editing an item that already had one set.
+  Future<void> cancelReminder(String reminderId) async {
+    if (currentHousehold == null) return;
+    await reminderRepo.cancelReminder(reminderId);
     reminders = await reminderRepo.getRemindersForHousehold(currentHousehold!.id);
     notifyListeners();
   }

@@ -55,10 +55,16 @@ class _TrendBarPainter extends CustomPainter {
       ..strokeWidth = 1;
     final labelStyle = TextStyle(color: Colors.grey.shade600, fontSize: 9);
 
+    int? lastLabelValue;
     for (final fraction in [0.0, 0.5, 1.0]) {
       final y = chartHeight - (chartHeight * fraction);
       canvas.drawLine(Offset(leftPad, y), Offset(size.width, y), gridPaint);
       final value = (maxVal * fraction).round();
+      // Skip a label that duplicates the one just drawn (e.g. maxVal=1
+      // makes the midpoint round to 1 too, same as the top) — the
+      // gridline still draws, just without a redundant repeated number.
+      if (value == lastLabelValue) continue;
+      lastLabelValue = value;
       final tp = TextPainter(
         text: TextSpan(text: '$value', style: labelStyle),
         textDirection: TextDirection.ltr,

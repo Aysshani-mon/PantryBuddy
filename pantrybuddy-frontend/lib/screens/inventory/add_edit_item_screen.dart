@@ -13,6 +13,7 @@ import 'barcode_scan_screen.dart';
 import 'photo_scan_screen.dart';
 import '../../models/recognition_candidate.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/dropdown_date_picker.dart';
 
 extension _FirstOrNull<T> on Iterable<T> {
   T? get firstOrNull => isEmpty ? null : first;
@@ -255,7 +256,7 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
 
   Future<void> _pickDate() async {
     final now = DateTime.now();
-    final picked = await showDatePicker(
+    final picked = await showDropdownDatePicker(
       context: context,
       initialDate: _useByDate ?? now,
       firstDate: DateTime(now.year - 1),
@@ -407,6 +408,16 @@ class _AddEditItemScreenState extends State<AddEditItemScreen> {
         await widget.appState.updateItem(item);
         if (_wantsReminder) {
           await widget.appState.setReminder(item, _effectiveLeadTime!, wasCustom: _useCustomLeadTime);
+        } else {
+          // Reminder toggle turned off during this edit — cancel any
+          // existing untriggered reminder for this item, otherwise the
+          // old one just stays active.
+          final existing = widget.appState.reminders
+              .where((r) => r.itemId == item.id && !r.triggered)
+              .toList();
+          for (final r in existing) {
+            await widget.appState.cancelReminder(r.id);
+          }
         }
       } else {
         final newItem = await widget.appState.addItem(

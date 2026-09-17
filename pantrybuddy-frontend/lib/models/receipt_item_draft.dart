@@ -28,6 +28,9 @@ class ReceiptItemDraft {
   ProductCategory? category;
   StorageLocation? storageLocation;
   DateTime? useByDate;
+  /// True once the user has picked a date themselves via the date
+  /// picker — shelf-life auto-fill must never overwrite that.
+  bool dateManuallyEdited = false;
   /// Whether this line resolved to any candidate at all when parsed —
   /// false means "not recognized as a known food item", shown to the
   /// user as a flag rather than silently dropped (they paid for it).

@@ -51,6 +51,7 @@ class PantryBuddyApp extends StatefulWidget {
 class _PantryBuddyAppState extends State<PantryBuddyApp> {
   late final AppState _appState;
   Timer? _reminderTimer;
+  bool _restoringSession = true; // "stay logged in" — brief check at startup before showing sign-in
 
   @override
   void initState() {
@@ -64,6 +65,15 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
       shelfLifeRepo: widget.dataStore,
       recognitionRepo: widget.dataStore,
     );
+    // Skip session restore entirely if this is a password-reset link —
+    // that flow doesn't need (and shouldn't wait on) a saved session.
+    if (_extractResetTokenFromUrl() != null) {
+      _restoringSession = false;
+    } else {
+      _appState.tryRestoreSession().then((_) {
+        if (mounted) setState(() => _restoringSession = false);
+      });
+    }
     // AC 3.2.1 — periodically checks for due reminders. A real deployment
     // would use a platform notification package (e.g. flutter_local_notifications)
     // to fire an actual push/local notification here; for iteration 1 this
@@ -97,6 +107,9 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
       home: ListenableBuilder(
         listenable: _appState,
         builder: (context, _) {
+          if (_restoringSession) {
+            return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          }
           final resetToken = _extractResetTokenFromUrl();
           if (resetToken != null) {
             return ResetPasswordScreen(appState: _appState, token: resetToken);

@@ -48,31 +48,53 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
   String? _engineError;
   bool _exited = false; // guards against stopping/popping more than once
 
+  // The barcode that most recently came back "not found", and when. While
+  // it's still sitting in frame, the scanner would otherwise re-detect it
+  // the instant scanning resumes and immediately re-trigger the same
+  // failed lookup — over and over, which is what looked like the screen
+  // "glitching"/flashing. Ignoring repeat detections of the SAME code for
+  // a short cooldown fixes that, while a genuinely different barcode
+  // still triggers a lookup right away.
+  String? _lastFailedBarcode;
+  DateTime? _lastFailedAt;
+  static const _failedCooldown = Duration(seconds: 4);
+
   @override
   void dispose() {
-    // Fire-and-forget fallback only — the real, reliable stop happens in
-    // _exit() before every pop (see below). mobile_scanner's dispose() is
-    // async as of 7.x, but State.dispose() can't be awaited, so this
-    // alone isn't guaranteed to finish before the route is gone; _exit()
-    // is what actually fixes the "camera stays on" issue.
-    _controller.dispose();
+    // Only a fallback for an unusual teardown path that skipped _exit()
+    // (e.g. the widget being removed without a normal pop) — normally
+    // _exit() has already disposed the controller by the time this runs,
+    // and disposing twice can throw.
+    if (!_exited) {
+      _controller.dispose();
+    }
     _manualCodeController.dispose();
     super.dispose();
   }
 
   /// The ONLY path that should ever close this screen — guarantees the
-  /// camera is actually stopped first. Handles the system back
+  /// camera is actually released first. Handles the system back
   /// gesture/AppBar back button (via PopScope below) as well as every
   /// explicit pop in this file, so there's no route out of this screen
   /// that skips releasing the camera.
+  ///
+  /// Calls BOTH stop() and dispose(): stop() alone was leaving the
+  /// browser's camera hardware indicator light on after leaving this
+  /// screen (confirmed via screen recording) — dispose() is what actually
+  /// tears down the underlying camera stream on web, not just pausing
+  /// frame analysis.
   Future<void> _exit([ScannedProduct? result]) async {
     if (_exited) return;
     _exited = true;
     try {
       await _controller.stop();
     } catch (_) {
-      // Already stopped/disposed, or never started — fine either way,
-      // we're exiting regardless.
+      // Already stopped, or never started — fine either way.
+    }
+    try {
+      await _controller.dispose();
+    } catch (_) {
+      // Already disposed — fine.
     }
     if (!mounted) return;
     Navigator.of(context).pop(result);
@@ -82,6 +104,10 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
     if (_busy) return;
     final code = capture.barcodes.firstOrNull?.rawValue;
     if (code == null || code.isEmpty) return;
+
+    if (code == _lastFailedBarcode && _lastFailedAt != null && DateTime.now().difference(_lastFailedAt!) < _failedCooldown) {
+      return; // same code that just failed, still in frame — don't re-trigger
+    }
     await _lookUp(code);
   }
 
@@ -101,6 +127,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
         setState(() {
           _busy = false;
           _statusMessage = 'No match found for barcode $barcode — try again, or enter the item manually.';
+          _lastFailedBarcode = barcode;
+          _lastFailedAt = DateTime.now();
         });
         await _controller.start();
         return;
@@ -119,6 +147,8 @@ class _BarcodeScanScreenState extends State<BarcodeScanScreen> {
       setState(() {
         _busy = false;
         _statusMessage = 'Product lookup failed: $e';
+        _lastFailedBarcode = barcode;
+        _lastFailedAt = DateTime.now();
       });
       await _controller.start();
     }

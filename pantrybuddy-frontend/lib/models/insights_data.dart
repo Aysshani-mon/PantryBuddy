@@ -44,7 +44,12 @@ class PeriodSummary {
 
   int get percentChangeVsPrevious {
     if (previousScore == null || previousScore == 0) return 0;
-    return (((score - previousScore!) / previousScore!) * 100).round();
+    final raw = (((score - previousScore!) / previousScore!) * 100).round();
+    // A period compared against a very low previous score (or a default
+    // "no activity" score — see calculateScore) can otherwise produce a
+    // mathematically huge but meaningless percentage (e.g. 400%+) —
+    // clamp to a sane, always-readable range.
+    return raw.clamp(-100, 100);
   }
 }
 

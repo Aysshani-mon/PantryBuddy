@@ -46,6 +46,11 @@ abstract class UserRepository {
   /// is holding — called when the user explicitly signs out.
   Future<void> signOut();
 
+  /// "Stay logged in" — attempts to restore a previously saved session at
+  /// app startup. Returns null if there's nothing saved, or it no longer
+  /// works (e.g. the token expired).
+  Future<AppUser?> restoreSession();
+
   Future<AppUser?> getUser(String userId);
   Future<AppUser> updateUser(AppUser user);
 }
@@ -121,6 +126,7 @@ abstract class ReminderRepository {
   Future<Reminder> setReminder(Reminder reminder);
   Future<List<Reminder>> getRemindersForHousehold(String householdId);
   Future<void> markTriggered(String reminderId);
+  Future<void> cancelReminder(String reminderId);
 }
 
 abstract class ActivityLogRepository {

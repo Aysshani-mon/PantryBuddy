@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/app_user.dart';
 import '../models/household.dart';
@@ -13,6 +14,26 @@ import '../models/recognition_candidate.dart';
 import '../models/receipt_item_draft.dart';
 import 'api_config.dart';
 import 'repository.dart';
+
+/// The backend's db.js uses `dateStrings: true`, so every DATETIME column
+/// comes back as a plain string like "2026-09-16 03:23:45" — no 'Z', no
+/// timezone marker at all, even though the value is genuinely UTC.
+/// Dart's DateTime.parse() treats a string with no timezone info as
+/// already being in the LOCAL timezone, which silently shifts every
+/// timestamp by the local UTC offset (8 hours early for Malaysia) — this
+/// is the fix: explicitly mark the string as UTC before parsing, then
+/// convert to local for display.
+///
+/// Only for genuine DATETIME fields (addedAt, resolvedAt, timestamp,
+/// etc.) — never for pure DATE fields like useByDate, which have no
+/// time-of-day component and would have their calendar date shifted by
+/// a day if run through this (midnight UTC minus 8 hours crosses into
+/// the previous day).
+DateTime _parseServerDateTime(String s) {
+  final normalized = s.contains('T') ? s : s.replaceFirst(' ', 'T');
+  final withZ = normalized.endsWith('Z') ? normalized : '${normalized}Z';
+  return DateTime.parse(withZ).toLocal();
+}
 
 /// Talks to the real pantrybuddy-backend API instead of holding data in
 /// memory. See lib/data/README.md for the full model<->schema mapping and
@@ -126,7 +147,7 @@ class ApiDataStore
   Household _householdFromJson(Map<String, dynamic> json) => Household(
         id: json['id'] as String,
         name: json['name'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
+        createdAt: _parseServerDateTime(json['createdAt'] as String),
       );
 
   HouseholdMember _memberFromJson(Map<String, dynamic> json) => HouseholdMember(
@@ -143,8 +164,8 @@ class ApiDataStore
         userName: json['userName'] as String,
         userAvatarKey: json['userAvatarKey'] as String,
         status: JoinRequestStatus.values.byName(json['status'] as String),
-        requestedAt: DateTime.parse(json['requestedAt'] as String),
-        reviewedAt: json['reviewedAt'] == null ? null : DateTime.parse(json['reviewedAt'] as String),
+        requestedAt: _parseServerDateTime(json['requestedAt'] as String),
+        reviewedAt: json['reviewedAt'] == null ? null : _parseServerDateTime(json['reviewedAt'] as String),
         reviewedByUserId: json['reviewedByUserId'] as String?,
       );
 
@@ -159,11 +180,11 @@ class ApiDataStore
         category: ProductCategory.values.byName(json['category'] as String),
         useByDate: DateTime.parse(json['useByDate'] as String),
         addedByUserId: json['addedByUserId'] as String,
-        addedAt: DateTime.parse(json['addedAt'] as String),
+        addedAt: _parseServerDateTime(json['addedAt'] as String),
         disposition: json['disposition'] == null
             ? null
             : ItemDisposition.values.byName(json['disposition'] as String),
-        resolvedAt: json['resolvedAt'] == null ? null : DateTime.parse(json['resolvedAt'] as String),
+        resolvedAt: json['resolvedAt'] == null ? null : _parseServerDateTime(json['resolvedAt'] as String),
         resolvedByUserId: json['resolvedByUserId'] as String?,
         discardReason: DiscardReasonLabel.fromApiValue(json['discardReason'] as String?),
         consumedAmount: ConsumedAmountLabel.fromApiValue(json['consumedAmount'] as String?),
@@ -179,7 +200,7 @@ class ApiDataStore
         leadTimeDays: json['leadTimeDays'] as int,
         wasCustomLeadTime: json['wasCustomLeadTime'] as bool? ?? false,
         triggered: json['triggered'] as bool? ?? false,
-        triggeredAt: json['triggeredAt'] == null ? null : DateTime.parse(json['triggeredAt'] as String),
+        triggeredAt: json['triggeredAt'] == null ? null : _parseServerDateTime(json['triggeredAt'] as String),
       );
 
   ActivityLogEntry _activityFromJson(Map<String, dynamic> json) => ActivityLogEntry(
@@ -189,10 +210,26 @@ class ApiDataStore
         actingUserName: json['actingUserName'] as String,
         action: ActivityAction.values.byName(json['action'] as String),
         itemName: json['itemName'] as String,
-        timestamp: DateTime.parse(json['timestamp'] as String),
+        timestamp: _parseServerDateTime(json['timestamp'] as String),
       );
 
   // ==================== UserRepository ====================
+
+  static const _prefsTokenKey = 'pb_session_token';
+  static const _prefsUserIdKey = 'pb_session_user_id';
+
+  Future<void> _persistSession(String? token, String userId) async {
+    if (token == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefsTokenKey, token);
+    await prefs.setString(_prefsUserIdKey, userId);
+  }
+
+  Future<void> _clearPersistedSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_prefsTokenKey);
+    await prefs.remove(_prefsUserIdKey);
+  }
 
   @override
   Future<AppUser> signUp({
@@ -208,19 +245,55 @@ class ApiDataStore
       'avatarKey': avatarKey,
     }) as Map<String, dynamic>;
     _token = json['token'] as String?;
-    return _userFromJson(json);
+    final user = _userFromJson(json);
+    await _persistSession(_token, user.id);
+    return user;
   }
 
   @override
   Future<AppUser> signIn({required String email, required String password}) async {
     final json = await _post('/auth/signin', {'email': email, 'password': password}) as Map<String, dynamic>;
     _token = json['token'] as String?;
-    return _userFromJson(json);
+    final user = _userFromJson(json);
+    await _persistSession(_token, user.id);
+    return user;
+  }
+
+  /// "Stay logged in" — called once at app startup. Reads a previously
+  /// saved token/userId (if any), and if the token still works (the
+  /// backend's JWTs expire after 24h, so this naturally stops working
+  /// after that regardless), returns the restored user. Returns null
+  /// (and clears whatever was saved) if there's nothing saved, or the
+  /// saved token no longer works.
+  @override
+  Future<AppUser?> restoreSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_prefsTokenKey);
+    final userId = prefs.getString(_prefsUserIdKey);
+    if (token == null || userId == null) return null;
+
+    _token = token;
+    try {
+      final user = await getUser(userId);
+      if (user == null) {
+        await _clearPersistedSession();
+        _token = null;
+        return null;
+      }
+      return user;
+    } catch (e) {
+      // Expired/invalid token, or a network hiccup — either way, fall
+      // back to the normal sign-in screen rather than getting stuck.
+      await _clearPersistedSession();
+      _token = null;
+      return null;
+    }
   }
 
   @override
   Future<void> signOut() async {
     _token = null;
+    await _clearPersistedSession();
   }
 
   @override
@@ -428,6 +501,11 @@ class ApiDataStore
   @override
   Future<void> markTriggered(String reminderId) async {
     await _post('/reminders/$reminderId/mark-triggered');
+  }
+
+  @override
+  Future<void> cancelReminder(String reminderId) async {
+    await _post('/reminders/$reminderId/cancel');
   }
 
   // ==================== ActivityLogRepository ====================

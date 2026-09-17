@@ -104,6 +104,12 @@ class InMemoryDataStore
   }
 
   @override
+  Future<AppUser?> restoreSession() async {
+    // The mock store never persists anything — nothing to restore.
+    return null;
+  }
+
+  @override
   Future<AppUser?> getUser(String userId) async => _users[userId];
 
   @override
@@ -339,6 +345,11 @@ class InMemoryDataStore
       reminder.triggered = true;
       reminder.triggeredAt = DateTime.now();
     }
+  }
+
+  @override
+  Future<void> cancelReminder(String reminderId) async {
+    _reminders.remove(reminderId);
   }
 
   // ---------------- ActivityLogRepository ----------------

@@ -8,7 +8,6 @@ import '../../widgets/item_card.dart';
 import '../../widgets/app_logo.dart';
 import '../inventory/expiring_soon_screen.dart';
 import '../inventory/item_detail_screen.dart';
-import '../inventory/add_edit_item_screen.dart';
 import '../household/switch_household_screen.dart';
 
 const _expiringSoonWindowDays = 3;
@@ -85,13 +84,6 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
           },
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => AddEditItemScreen(appState: widget.appState),
-        )),
-        icon: const Icon(Icons.add),
-        label: const Text('Add item'),
-      ),
     );
   }
 
@@ -107,7 +99,7 @@ class _HomeOverviewTabState extends State<HomeOverviewTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const AppLogo(markSize: 200, direction: Axis.horizontal),
+          const AppLogo(markSize: 150, direction: Axis.horizontal),
           const SizedBox(height: 16),
           Material(
             color: AppTheme.seedColor,

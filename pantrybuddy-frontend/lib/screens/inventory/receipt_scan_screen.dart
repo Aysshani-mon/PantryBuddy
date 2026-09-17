@@ -1,13 +1,16 @@
-import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/food_item.dart';
 import '../../models/receipt_item_draft.dart';
+import '../../models/shelf_life_suggestion.dart';
 import '../../services/browser_ocr_service.dart';
 import '../../services/category_defaults_service.dart';
 import '../../state/app_state.dart';
 import '../../utils/date_format.dart';
 import '../../utils/unit_options.dart';
+import '../../widgets/dropdown_date_picker.dart';
 
 enum _Stage { capture, working, review, submitting }
 
@@ -29,17 +32,47 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
   _Stage _stage = _Stage.capture;
   String? _error;
   List<ReceiptItemDraft> _drafts = [];
+  bool _showValidation = false; // AC 4.3.20 — only highlight fields after a failed submit attempt
 
   Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: source, maxWidth: 1600, imageQuality: 90);
-    if (picked == null) return;
+    XFile? picked;
+    try {
+      picked = await ImagePicker().pickImage(source: source, maxWidth: 1600, imageQuality: 90);
+    } on PlatformException catch (e) {
+      if (!mounted) return;
+      setState(() => _error = _messageForPickerError(source, e));
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = source == ImageSource.camera
+          ? 'Camera permission denied. Allow camera access or enter the item manually.'
+          : 'Gallery permission denied. Allow gallery access or enter the item manually.');
+      return;
+    }
+    if (picked == null) return; // user cancelled — not an error
+
     final bytes = await picked.readAsBytes();
     setState(() {
       _error = null;
       _stage = _Stage.working;
     });
     await _runPipeline(bytes);
+  }
+
+  /// AC 4.3.5 / 4.3.9 — distinguishes a permission denial from any other
+  /// picker failure, and always leaves the OTHER capture option available
+  /// (staying on _Stage.capture keeps both buttons visible either way).
+  String _messageForPickerError(ImageSource source, PlatformException e) {
+    final signal = '${e.code} ${e.message ?? ''}'.toLowerCase();
+    final looksLikePermission = signal.contains('denied') || signal.contains('permission') || signal.contains('notallowed');
+    if (source == ImageSource.camera) {
+      return looksLikePermission
+          ? 'Camera permission denied. Allow camera access or enter the item manually.'
+          : 'Camera is unavailable right now. Try again, or choose from your gallery.';
+    }
+    return looksLikePermission
+        ? 'Gallery permission denied. Allow gallery access or enter the item manually.'
+        : 'Gallery is unavailable right now. Try again, or take a photo instead.';
   }
 
   Future<void> _runPipeline(Uint8List bytes) async {
@@ -50,19 +83,21 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
       if (drafts.isEmpty) {
         setState(() {
           _stage = _Stage.capture;
-          _error = 'Couldn\'t find any items on this receipt. Make sure the photo is clear and try again, or enter items manually.';
+          _error = 'No food items detected. Please try another receipt photo.';
         });
         return;
       }
-      // Pre-fill a sensible storage-location guess per category, same
-      // helper used by barcode scanning — still fully editable below.
       for (final d in drafts) {
         d.storageLocation = CategoryDefaultsService.suggestLocation(d.category);
       }
       setState(() {
         _drafts = drafts;
         _stage = _Stage.review;
+        _showValidation = false;
       });
+      // AC 4.3.19 — apply shelf-life estimation for every item once
+      // review opens (each already has a category/storage guess).
+      unawaited(_fetchAllShelfLifeSuggestions());
     } on BrowserOcrException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -73,21 +108,47 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
       if (!mounted) return;
       setState(() {
         _stage = _Stage.capture;
-        _error = 'Something went wrong reading this receipt: $e';
+        _error = 'Unable to read this receipt. Try another photo, or a clearer one.';
       });
+    }
+  }
+
+  Future<void> _fetchAllShelfLifeSuggestions() async {
+    await Future.wait(_drafts.map(_fetchShelfLifeSuggestion));
+  }
+
+  /// AC 4.3.19 — applies the existing shelf-life estimation rules for
+  /// [draft]'s current category/storage, same source data and conversion
+  /// (recommendedDays -> today + N days) as the single-item Add screen.
+  /// Never overwrites a date the user picked themselves.
+  Future<void> _fetchShelfLifeSuggestion(ReceiptItemDraft draft) async {
+    if (draft.category == null || draft.dateManuallyEdited) return;
+    try {
+      final suggestions = await widget.appState.getStorageSuggestions(
+        category: draft.category!,
+        itemName: draft.name,
+      );
+      if (!mounted || draft.dateManuallyEdited) return;
+      final live = draft.storageLocation == null ? null : suggestions[draft.storageLocation];
+      if (live != null && live.status == ShelfLifeRuleStatus.available && live.recommendedDays != null) {
+        final days = live.recommendedDays!.round().clamp(0, 3650);
+        setState(() => draft.useByDate = DateTime.now().add(Duration(days: days)));
+      }
+    } catch (_) {
+      // A shelf-life lookup hiccup shouldn't block reviewing the receipt —
+      // the date just stays for manual entry.
     }
   }
 
   Future<void> _submit() async {
     final toAdd = _drafts.where((d) => d.included).toList();
-    if (toAdd.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select at least one item to add.')));
-      return;
-    }
+    if (toAdd.isEmpty) return; // button is disabled in this case — see AC 4.3.21
+
     final missing = toAdd.where((d) => d.category == null || d.storageLocation == null || d.useByDate == null).toList();
     if (missing.isNotEmpty) {
+      setState(() => _showValidation = true); // AC 4.3.20 — highlight the specific fields
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${missing.length} item(s) still need a category, storage location, or use-by date.')),
+        SnackBar(content: Text('${missing.length} item(s) need a category, storage location, or use-by date.')),
       );
       return;
     }
@@ -221,9 +282,11 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
         ),
         Padding(
           padding: const EdgeInsets.all(20),
+          // AC 4.3.21 — disabled outright when nothing is selected, not
+          // just a warning after tapping.
           child: ElevatedButton(
-            onPressed: _submit,
-            child: Text('Add $includedCount item${includedCount == 1 ? '' : 's'} to inventory'),
+            onPressed: includedCount == 0 ? null : _submit,
+            child: Text(includedCount == 0 ? 'Select items to add' : 'Add $includedCount item${includedCount == 1 ? '' : 's'} to inventory'),
           ),
         ),
       ],
@@ -231,6 +294,14 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
   }
 
   Widget _buildDraftCard(ReceiptItemDraft draft) {
+    // AC 4.3.20 — only shown as invalid after a failed submit attempt,
+    // and only for items still checked (an unchecked item is never
+    // validated — it won't be saved anyway).
+    final showErrors = _showValidation && draft.included;
+    final categoryMissing = showErrors && draft.category == null;
+    final storageMissing = showErrors && draft.storageLocation == null;
+    final dateMissing = showErrors && draft.useByDate == null;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -260,7 +331,7 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
                   children: [
                     Icon(Icons.help_outline, size: 14, color: Colors.orange.shade800),
                     const SizedBox(width: 4),
-                    Text('Not recognized — please pick a category', style: TextStyle(color: Colors.orange.shade800, fontSize: 11.5)),
+                    Text('Not recognised — please pick a category', style: TextStyle(color: Colors.orange.shade800, fontSize: 11.5)),
                   ],
                 ),
               ),
@@ -308,27 +379,41 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
                       Expanded(
                         child: DropdownButtonFormField<ProductCategory>(
                           initialValue: draft.category,
-                          decoration: const InputDecoration(labelText: 'Category', isDense: true),
+                          decoration: InputDecoration(
+                            labelText: 'Category',
+                            isDense: true,
+                            errorText: categoryMissing ? 'Required' : null,
+                          ),
                           hint: const Text('Select'),
                           items: ProductCategory.values
                               .map((c) => DropdownMenuItem(value: c, child: Text(c.label, overflow: TextOverflow.ellipsis)))
                               .toList(),
-                          onChanged: (v) => setState(() {
-                            draft.category = v;
-                            draft.storageLocation ??= CategoryDefaultsService.suggestLocation(v);
-                          }),
+                          onChanged: (v) {
+                            setState(() {
+                              draft.category = v;
+                              draft.storageLocation ??= CategoryDefaultsService.suggestLocation(v);
+                            });
+                            _fetchShelfLifeSuggestion(draft);
+                          },
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: DropdownButtonFormField<StorageLocation>(
                           initialValue: draft.storageLocation,
-                          decoration: const InputDecoration(labelText: 'Storage', isDense: true),
+                          decoration: InputDecoration(
+                            labelText: 'Storage',
+                            isDense: true,
+                            errorText: storageMissing ? 'Required' : null,
+                          ),
                           hint: const Text('Select'),
                           items: StorageLocation.values
                               .map((s) => DropdownMenuItem(value: s, child: Text(s.label)))
                               .toList(),
-                          onChanged: (v) => setState(() => draft.storageLocation = v),
+                          onChanged: (v) {
+                            setState(() => draft.storageLocation = v);
+                            _fetchShelfLifeSuggestion(draft);
+                          },
                         ),
                       ),
                     ],
@@ -336,16 +421,25 @@ class _ReceiptScanScreenState extends State<ReceiptScanScreen> {
                   const SizedBox(height: 8),
                   InkWell(
                     onTap: () async {
-                      final picked = await showDatePicker(
+                      final picked = await showDropdownDatePicker(
                         context: context,
                         initialDate: draft.useByDate ?? DateTime.now().add(const Duration(days: 5)),
                         firstDate: DateTime.now().subtract(const Duration(days: 1)),
                         lastDate: DateTime.now().add(const Duration(days: 365 * 2)),
                       );
-                      if (picked != null) setState(() => draft.useByDate = picked);
+                      if (picked != null) {
+                        setState(() {
+                          draft.useByDate = picked;
+                          draft.dateManuallyEdited = true;
+                        });
+                      }
                     },
                     child: InputDecorator(
-                      decoration: const InputDecoration(labelText: 'Use-by date', isDense: true),
+                      decoration: InputDecoration(
+                        labelText: 'Use-by date',
+                        isDense: true,
+                        errorText: dateMissing ? 'Required' : null,
+                      ),
                       child: Text(draft.useByDate == null ? 'Tap to set' : formatLongDate(draft.useByDate!)),
                     ),
                   ),

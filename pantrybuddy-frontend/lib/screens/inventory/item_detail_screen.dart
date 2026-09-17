@@ -10,6 +10,11 @@ import 'record_discard_screen.dart';
 /// The standalone "Delete" action was removed (usability testing found
 /// no real use for it once every item must be explicitly resolved via
 /// one of these three actions instead).
+///
+/// Wrapped in a ListenableBuilder and always re-reads the current item
+/// from AppState.items by id, rather than displaying the fixed snapshot
+/// passed in at navigation time — otherwise editing an item and coming
+/// back here showed stale details until you left and reopened the screen.
 class ItemDetailScreen extends StatelessWidget {
   const ItemDetailScreen({super.key, required this.appState, required this.item});
   final AppState appState;
@@ -17,6 +22,7 @@ class ItemDetailScreen extends StatelessWidget {
 
   Future<void> _resolve(
     BuildContext context,
+    FoodItem item,
     ItemDisposition disposition, {
     DiscardReason? discardReason,
     ConsumedAmount? consumedAmount,
@@ -44,7 +50,7 @@ class ItemDetailScreen extends StatelessWidget {
     }
   }
 
-  Future<void> _consume(BuildContext context) async {
+  Future<void> _consume(BuildContext context, FoodItem item) async {
     final amount = await showModalBottomSheet<ConsumedAmount>(
       context: context,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
@@ -71,20 +77,20 @@ class ItemDetailScreen extends StatelessWidget {
       ),
     );
     if (amount != null && context.mounted) {
-      await _resolve(context, ItemDisposition.consumed, consumedAmount: amount);
+      await _resolve(context, item, ItemDisposition.consumed, consumedAmount: amount);
     }
   }
 
-  Future<void> _discard(BuildContext context) async {
+  Future<void> _discard(BuildContext context, FoodItem item) async {
     final reason = await Navigator.of(context).push<DiscardReason>(
       MaterialPageRoute(builder: (_) => RecordDiscardScreen(item: item)),
     );
     if (reason != null && context.mounted) {
-      await _resolve(context, ItemDisposition.discarded, discardReason: reason);
+      await _resolve(context, item, ItemDisposition.discarded, discardReason: reason);
     }
   }
 
-  Future<void> _donate(BuildContext context) async {
+  Future<void> _donate(BuildContext context, FoodItem item) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -97,12 +103,26 @@ class ItemDetailScreen extends StatelessWidget {
       ),
     );
     if (confirmed == true && context.mounted) {
-      await _resolve(context, ItemDisposition.donated);
+      await _resolve(context, item, ItemDisposition.donated);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: appState,
+      builder: (context, _) {
+        // Always the current version — falls back to the originally
+        // passed-in item only if it's ever been removed from the list.
+        final liveItem = appState.items.where((i) => i.id == item.id).isEmpty
+            ? item
+            : appState.items.firstWhere((i) => i.id == item.id);
+        return _buildScaffold(context, liveItem);
+      },
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, FoodItem item) {
     final color = urgencyColor(item.daysLeft);
     return Scaffold(
       appBar: AppBar(
@@ -188,7 +208,7 @@ class ItemDetailScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: () => _consume(context),
+                  onPressed: () => _consume(context, item),
                   icon: const Icon(Icons.restaurant_outlined),
                   label: const Text('Consume', style: TextStyle(fontSize: 15.5)),
                 ),
@@ -198,7 +218,7 @@ class ItemDetailScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: () => _discard(context),
+                  onPressed: () => _discard(context, item),
                   icon: const Icon(Icons.delete_sweep_outlined),
                   label: const Text('Discard', style: TextStyle(fontSize: 15.5)),
                   style: ElevatedButton.styleFrom(
@@ -212,7 +232,7 @@ class ItemDetailScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: () => _donate(context),
+                  onPressed: () => _donate(context, item),
                   icon: const Icon(Icons.volunteer_activism_outlined),
                   label: const Text('Donate', style: TextStyle(fontSize: 15.5)),
                   style: ElevatedButton.styleFrom(

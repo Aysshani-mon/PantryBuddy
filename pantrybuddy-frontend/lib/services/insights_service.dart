@@ -105,6 +105,13 @@ class InsightsService {
     final prevDonated = resolved.where((i) =>
         i.disposition == ItemDisposition.donated && i.resolvedAt != null && prevRange.contains(i.resolvedAt!)).length;
     final hasPrevData = prevConsumed + prevWasted + prevDonated > 0;
+    // A period with no resolved items of its own gets a default "no
+    // data" score (see calculateScore) — comparing that default against
+    // a real previous score is exactly what produced misleading jumps
+    // like "400% more waste" when there was really just nothing to
+    // compare. Treat "no current activity" the same as "no previous
+    // data": don't offer a comparison at all.
+    final hasCurrentData = consumed + wasted + donated > 0;
 
     return PeriodSummary(
       consumed: consumed,
@@ -112,7 +119,7 @@ class InsightsService {
       donated: donated,
       stored: stored,
       score: score,
-      previousScore: hasPrevData ? calculateScore(consumed: prevConsumed, wasted: prevWasted, donated: prevDonated) : null,
+      previousScore: (hasPrevData && hasCurrentData) ? calculateScore(consumed: prevConsumed, wasted: prevWasted, donated: prevDonated) : null,
     );
   }
 

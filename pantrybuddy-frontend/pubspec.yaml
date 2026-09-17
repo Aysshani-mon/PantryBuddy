@@ -19,6 +19,9 @@ dependencies:
   # Photo capture for image recognition (User Story 4.3) — camera/gallery
   # picker with built-in resize/compression so uploads stay small.
   image_picker: ^1.1.2
+  # Persists the session token/userId across app restarts (User Story:
+  # "stay logged in") — uses browser localStorage on web.
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

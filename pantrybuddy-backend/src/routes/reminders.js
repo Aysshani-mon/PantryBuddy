@@ -63,4 +63,16 @@ router.post('/reminders/:id/mark-triggered', asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// POST /reminders/:id/cancel
+// Was a known gap since Iteration 1 (schema.sql's CANCELLED status had no
+// route) — needed so turning a reminder off during an edit actually
+// removes it, instead of the old reminder silently staying active.
+router.post('/reminders/:id/cancel', asyncHandler(async (req, res) => {
+  const [rows] = await pool.query('SELECT team_id FROM reminders WHERE reminder_id = ?', [req.params.id]);
+  if (rows.length === 0) throw new ApiError(404, 'Reminder not found.');
+  await assertMember(req.userId, rows[0].team_id);
+  await pool.query("UPDATE reminders SET status = 'CANCELLED', cancelled_at = NOW() WHERE reminder_id = ? AND status = 'PENDING'", [req.params.id]);
+  res.json({ ok: true });
+}));
+
 module.exports = router;
