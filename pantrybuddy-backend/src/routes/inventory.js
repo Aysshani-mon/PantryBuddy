@@ -254,12 +254,33 @@ router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
     const isPartialConsumption = disposition === 'consumed' && (consumedAmount === 'partial' || consumedAmount === 'half');
 
     if (isPartialConsumption) {
-      // Item stays IN_STOCK — just record the marker, don't resolve it.
-      await conn.query('UPDATE inventory_items SET consumed_amount = ? WHERE inventory_item_id = ?', [consumedAmount, req.params.id]);
+      // How much is left after this use. Validated against the item's
+      // current quantity — was missing entirely before, which is why
+      // partial/half consumption never actually changed stock: this
+      // branch used to update consumed_amount only. Falls back to
+      // leaving quantity unchanged if an older client doesn't send it,
+      // rather than erroring.
+      let newQuantity = item.quantity;
+      if (req.body.quantity !== undefined && req.body.quantity !== null) {
+        const q = Number(req.body.quantity);
+        if (!Number.isFinite(q) || q < 0 || q > Number(item.quantity)) {
+          throw new ApiError(400, `quantity must be a number between 0 and the item's current quantity (${item.quantity}).`);
+        }
+        newQuantity = q;
+      }
+      const consumedDelta = Number(item.quantity) - newQuantity;
+
+      // Item stays IN_STOCK — just record the new quantity and marker,
+      // don't resolve it.
+      await conn.query('UPDATE inventory_items SET quantity = ?, consumed_amount = ? WHERE inventory_item_id = ?', [newQuantity, consumedAmount, req.params.id]);
       await conn.query(
         `INSERT INTO inventory_transactions (inventory_item_id, user_id, transaction_type, quantity, note)
          VALUES (?, ?, 'CONSUME', ?, ?)`,
-        [req.params.id, resolvedByUserId, item.quantity, `Marked partially consumed (${consumedAmount})`]
+        // The transaction log records the amount actually consumed this
+        // action (the delta), not the item's old total — consistent
+        // with a transaction row meaning "what happened", not "what was
+        // on hand".
+        [req.params.id, resolvedByUserId, consumedDelta, `Marked partially consumed (${consumedAmount}) — ${newQuantity} ${item.unit || 'pcs'} left`]
       );
       await conn.commit();
       const [updatedRows] = await conn.query(`${ITEM_SELECT} WHERE ii.inventory_item_id = ?`, [req.params.id]);
