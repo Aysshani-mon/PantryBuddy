@@ -8,6 +8,8 @@ import '../models/food_item.dart';
 import '../models/reminder.dart';
 import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
+import '../models/environmental_impact.dart';
+import '../models/insights_data.dart';
 import '../data/repository.dart';
 import '../services/id_service.dart';
 import '../services/reminder_service.dart';
@@ -24,6 +26,7 @@ class AppState extends ChangeNotifier {
     required this.activityRepo,
     required this.shelfLifeRepo,
     required this.recognitionRepo,
+    required this.environmentalImpactRepo,
   });
 
   final UserRepository userRepo;
@@ -33,6 +36,7 @@ class AppState extends ChangeNotifier {
   final ActivityLogRepository activityRepo;
   final ShelfLifeRepository shelfLifeRepo;
   final RecognitionRepository recognitionRepo;
+  final EnvironmentalImpactRepository environmentalImpactRepo;
 
   AppUser? currentUser;
   Household? currentHousehold;
@@ -400,21 +404,53 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Consume / discard — resolves the item out of the active inventory.
+  /// Consume / discard / donate — fully resolves the item out of active
+  /// inventory, EXCEPT a partial or half consumption, which now actually
+  /// reduces [FoodItem.quantity] instead of just being a label:
+  ///   - half: quantity is halved (4 chickens -> 2; a 2kg bag -> 1kg).
+  ///   - partial: [remainingQuantity] is the user's own answer to "how
+  ///     much is left?" — there's no single correct fraction for
+  ///     "some of it", so the app asks rather than guesses.
+  /// If what's left rounds down to near-zero, the item is auto-resolved
+  /// as a full consumption instead of leaving a technically-active item
+  /// with ~0 left sitting in inventory indefinitely.
   Future<void> resolveItem(
     FoodItem item,
     ItemDisposition disposition, {
     DiscardReason? discardReason,
     ConsumedAmount? consumedAmount,
+    double? remainingQuantity,
   }) async {
     if (currentUser == null || currentHousehold == null) return;
-    // A "consumed" action with a partial/half amount does NOT resolve
-    // the item — it stays active in the inventory, just tagged with how
-    // much has been used so far. Only "full" (or discard/donate)
-    // actually resolves it and removes it from the active list.
+
     final isPartialConsumption = disposition == ItemDisposition.consumed &&
         (consumedAmount == ConsumedAmount.partial || consumedAmount == ConsumedAmount.half);
-    if (!isPartialConsumption) {
+
+    const nearZeroThreshold = 0.01;
+    var endedUpFullyResolved = !isPartialConsumption;
+
+    if (isPartialConsumption) {
+      final rawNewQty = consumedAmount == ConsumedAmount.half
+          ? item.quantity / 2
+          : (remainingQuantity ?? item.quantity);
+      // Round to 3dp — avoids ugly float noise (e.g. 0.311/2 = 0.1555)
+      // without over-rounding a genuinely precise weighed quantity.
+      final newQty = double.parse(rawNewQty.clamp(0, item.quantity).toStringAsFixed(3));
+
+      if (newQty <= nearZeroThreshold) {
+        // Effectively finished — treat as a full consumption rather than
+        // leaving a near-empty item active forever.
+        item.quantity = 0;
+        item.disposition = ItemDisposition.consumed;
+        item.resolvedAt = DateTime.now();
+        item.resolvedByUserId = currentUser!.id;
+        consumedAmount = ConsumedAmount.full;
+        endedUpFullyResolved = true;
+      } else {
+        item.quantity = newQty;
+        // Stays active — disposition/resolvedAt/resolvedByUserId untouched.
+      }
+    } else {
       item.disposition = disposition;
       item.resolvedAt = DateTime.now();
       item.resolvedByUserId = currentUser!.id;
@@ -423,21 +459,25 @@ class AppState extends ChangeNotifier {
     item.consumedAmount = consumedAmount;
     await inventoryRepo.updateItem(item);
     await _refreshItemsNow(); // instant feedback instead of waiting for the next poll tick
-    if (!isPartialConsumption) {
-      final action = switch (disposition) {
-        ItemDisposition.consumed => ActivityAction.consumed,
-        ItemDisposition.discarded => ActivityAction.discarded,
-        ItemDisposition.donated => ActivityAction.donated,
-      };
-      await activityRepo.logActivity(ActivityLogEntry(
-        id: IdService.newId('log'),
-        householdId: currentHousehold!.id,
-        actingUserId: currentUser!.id,
-        actingUserName: currentUser!.name,
-        action: action,
-        itemName: item.name,
-      ));
-    }
+
+    // Logged for every real change now, including partial/half — those
+    // genuinely change stock now, not just a label, so they're just as
+    // worth recording as a full resolve.
+    final action = endedUpFullyResolved
+        ? switch (item.disposition!) {
+            ItemDisposition.consumed => ActivityAction.consumed,
+            ItemDisposition.discarded => ActivityAction.discarded,
+            ItemDisposition.donated => ActivityAction.donated,
+          }
+        : ActivityAction.consumed; // partial/half: still a consumption event, just not the whole item
+    await activityRepo.logActivity(ActivityLogEntry(
+      id: IdService.newId('log'),
+      householdId: currentHousehold!.id,
+      actingUserId: currentUser!.id,
+      actingUserName: currentUser!.name,
+      action: action,
+      itemName: item.name,
+    ));
   }
 
   /// Fetches the current item list immediately, rather than waiting for
@@ -561,6 +601,20 @@ class AppState extends ChangeNotifier {
     String? itemName,
   }) {
     return shelfLifeRepo.getStorageSuggestions(category: category, itemName: itemName);
+  }
+
+  // ==================== Environmental impact (Epic 8) ====================
+
+  /// Read-only pass-through (changes no state, so no notifyListeners) —
+  /// see [EnvironmentalImpactRepository]. Returns the pending state if
+  /// there's no household yet.
+  Future<EnvironmentalImpact> getEnvironmentalImpact({required DateRange range, required DateRange previous}) {
+    if (currentHousehold == null) return Future.value(const EnvironmentalImpact.pending());
+    return environmentalImpactRepo.getEnvironmentalImpact(
+      householdId: currentHousehold!.id,
+      range: range,
+      previous: previous,
+    );
   }
 
   // ==================== Sign out ====================

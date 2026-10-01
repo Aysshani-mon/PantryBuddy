@@ -7,6 +7,8 @@ import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
 import '../models/recognition_candidate.dart';
 import '../models/receipt_item_draft.dart';
+import '../models/environmental_impact.dart';
+import '../models/insights_data.dart';
 
 /// See lib/data/README.md — screens depend only on these interfaces,
 /// never on a concrete storage implementation.
@@ -172,3 +174,17 @@ abstract class RecognitionRepository {
   Future<List<ReceiptItemDraft>> recognizeReceipt(String rawText);
 }
 
+
+/// Epic 8 — server-calculated CO2e estimate for food wasted in a period.
+/// Calculated on the backend (not in Flutter) so the emission-factor
+/// reference data and the formula live in one place.
+abstract class EnvironmentalImpactRepository {
+  /// [previous] is the period to compare against (e.g. last week/month).
+  /// Returns [EnvironmentalImpactStatus.pendingData] rather than throwing
+  /// while the reference data hasn't been loaded yet.
+  Future<EnvironmentalImpact> getEnvironmentalImpact({
+    required String householdId,
+    required DateRange range,
+    required DateRange previous,
+  });
+}

@@ -64,6 +64,7 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
       activityRepo: widget.dataStore,
       shelfLifeRepo: widget.dataStore,
       recognitionRepo: widget.dataStore,
+      environmentalImpactRepo: widget.dataStore,
     );
     // Skip session restore entirely if this is a password-reset link —
     // that flow doesn't need (and shouldn't wait on) a saved session.

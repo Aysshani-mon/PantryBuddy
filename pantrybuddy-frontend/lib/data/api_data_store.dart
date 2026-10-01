@@ -12,6 +12,8 @@ import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
 import '../models/recognition_candidate.dart';
 import '../models/receipt_item_draft.dart';
+import '../models/environmental_impact.dart';
+import '../models/insights_data.dart';
 import 'api_config.dart';
 import 'repository.dart';
 
@@ -52,7 +54,8 @@ class ApiDataStore
         ReminderRepository,
         ActivityLogRepository,
         RecognitionRepository,
-        ShelfLifeRepository {
+        ShelfLifeRepository,
+        EnvironmentalImpactRepository {
   ApiDataStore({this.baseUrl = ApiConfig.baseUrl});
 
   final String baseUrl;
@@ -447,6 +450,13 @@ class ApiDataStore
         'resolvedByUserId': item.addedByUserId,
         if (item.discardReason != null) 'discardReason': item.discardReason!.apiValue,
         if (item.consumedAmount != null) 'consumedAmount': item.consumedAmount!.apiValue,
+        // Partial/half consumption changes the actual stock level — this
+        // was missing entirely before, which is why the quantity never
+        // actually updated: the new value was computed correctly in
+        // AppState, but never made it into the request that's supposed
+        // to persist it, so the very next refresh silently pulled the
+        // old, unchanged value straight back from the server.
+        if (isPartialConsumption) 'quantity': item.quantity,
       });
       return _itemFromJson(json as Map<String, dynamic>);
     }
@@ -565,6 +575,28 @@ class ApiDataStore
             ? null
             : ShelfLifeSuggestion.fromJson(json[location.name] as Map<String, dynamic>),
     };
+  }
+
+  // ==================== EnvironmentalImpactRepository ====================
+
+  @override
+  Future<EnvironmentalImpact> getEnvironmentalImpact({
+    required String householdId,
+    required DateRange range,
+    required DateRange previous,
+  }) async {
+    // Instants go over the wire as UTC (the backend compares against
+    // UTC DATETIME columns); the offset lets the server group the daily
+    // trend by the user's own calendar day.
+    final query = Uri(queryParameters: {
+      'start': range.start.toUtc().toIso8601String(),
+      'end': range.end.toUtc().toIso8601String(),
+      'previousStart': previous.start.toUtc().toIso8601String(),
+      'previousEnd': previous.end.toUtc().toIso8601String(),
+      'tzOffsetMinutes': '${range.start.timeZoneOffset.inMinutes}',
+    }).query;
+    final json = await _get('/households/$householdId/environmental-impact?$query');
+    return EnvironmentalImpact.fromJson(json as Map<String, dynamic>);
   }
 
   // ==================== RecognitionRepository ====================
