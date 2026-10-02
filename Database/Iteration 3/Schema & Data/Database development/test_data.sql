@@ -1,5 +1,5 @@
 -- ============================================================
--- PantryBuddy - Household Inventory Reminder System
+-- PantrySentry - Household Inventory Reminder System
 -- Iteration 2
 -- Test Script (test_data.sql)
 --
@@ -503,7 +503,7 @@ INSERT INTO product_keyword_mapping
   (reference_id, keyword, normalized_keyword, match_type, source_name, source_url, source_locator, is_active)
 VALUES
   (1, 'Test Keyword Mangosteen', 'test keyword mangosteen', 'TEXT', 'Edge case test',
-   'https://example.com/pantrybuddy/tests/keyword-insert', 'test/keyword/insert', TRUE);
+   'https://example.com/pantrysentry/tests/keyword-insert', 'test/keyword/insert', TRUE);
 
 SET @mapping_id = LAST_INSERT_ID();
 
@@ -519,7 +519,7 @@ INSERT INTO product_keyword_mapping
   (reference_id, keyword, normalized_keyword, match_type, source_name, source_url)
 VALUES
   (1, 'Test Keyword Mangosteen Copy', 'test keyword mangosteen', 'TEXT', 'Edge case test',
-   'https://example.com/pantrybuddy/tests/keyword-duplicate');
+   'https://example.com/pantrysentry/tests/keyword-duplicate');
 
 ROLLBACK;
 
@@ -536,7 +536,7 @@ VALUES (7891, NULL, 15, 'Temp Keyword Reference', NULL, 'Edge case test referenc
 INSERT INTO product_keyword_mapping
   (reference_id, keyword, normalized_keyword, match_type, source_name, source_url)
 VALUES (7891, 'Temp Restrict Keyword', 'temp restrict keyword', 'TEXT', 'Edge case test',
-        'https://example.com/pantrybuddy/tests/restrict-keyword');
+        'https://example.com/pantrysentry/tests/restrict-keyword');
 
 -- [EXPECTED ERROR] Cannot delete or update a parent row:
 -- product_keyword_mapping references product_reference (error 1451)
@@ -547,7 +547,7 @@ ROLLBACK;
 -- ============================================================
 -- SCENARIO 24: price_item_reference insert and FK ON DELETE RESTRICT
 -- item_code identifies one PriceCatcher item and unit; reference_id links
--- it to a PantryBuddy recognition reference.
+-- it to a PantrySentry recognition reference.
 -- ============================================================
 START TRANSACTION;
 
@@ -560,7 +560,7 @@ INSERT INTO price_item_reference
    median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
 VALUES
   (900003, 7892, 'TEST PRICE ITEM', '1 kg', 1.0000, 'kg', 5.50, 5.60, 5.50, 5.5000,
-   1, '2026-09-03', 'https://example.com/pantrybuddy/tests/price-item');
+   1, '2026-09-03', 'https://example.com/pantrysentry/tests/price-item');
 
 SELECT item_code, reference_id, base_unit, median_package_price
 FROM price_item_reference
@@ -605,7 +605,7 @@ INSERT INTO price_item_reference
    median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
 VALUES
   (900004, 1, 'TEST OBSERVED PRICE ITEM', '1 kg', 1.0000, 'kg', 4.50, 4.60, 4.50, 4.5000,
-   1, '2026-09-05', 'https://example.com/pantrybuddy/tests/price-observation');
+   1, '2026-09-05', 'https://example.com/pantrysentry/tests/price-observation');
 
 INSERT INTO price_observations (observation_date, premise_code, item_code, price_myr)
 VALUES ('2026-09-05', 9102, 900004, 4.50);

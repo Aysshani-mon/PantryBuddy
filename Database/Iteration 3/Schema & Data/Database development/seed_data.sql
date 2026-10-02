@@ -1,5 +1,5 @@
 -- ============================================================
--- PantryBuddy - Household Inventory Reminder System
+-- PantrySentry - Household Inventory Reminder System
 -- Iteration 3
 -- Seed Data (seed_data.sql)
 --
@@ -99,12 +99,12 @@ INSERT INTO product_reference (reference_id, product_id, category_id, product_na
 INSERT INTO product_keyword_mapping
   (reference_id, keyword, normalized_keyword, match_type, source_name, source_url, source_locator, is_active)
 VALUES
-  (1,    'Seed Sample Starfruit Label', 'seed sample starfruit label', 'TEXT', 'PantryBuddy seed data',
-   'https://example.com/pantrybuddy/seed/starfruit', 'seed/starfruit/text', TRUE),
-  (7882, 'Seed Sample Chili Paste Jar', 'seed sample chili paste jar', 'TEXT', 'PantryBuddy seed data',
-   'https://example.com/pantrybuddy/seed/chili-paste', 'seed/chili-paste/text', TRUE),
-  (7883, 'Seed Sample Anchovy Pack',    'seed sample anchovy pack',    'TEXT', 'PantryBuddy seed data',
-   'https://example.com/pantrybuddy/seed/anchovy', 'seed/anchovy/text', FALSE);
+  (1,    'Seed Sample Starfruit Label', 'seed sample starfruit label', 'TEXT', 'PantrySentry seed data',
+   'https://example.com/pantrysentry/seed/starfruit', 'seed/starfruit/text', TRUE),
+  (7882, 'Seed Sample Chili Paste Jar', 'seed sample chili paste jar', 'TEXT', 'PantrySentry seed data',
+   'https://example.com/pantrysentry/seed/chili-paste', 'seed/chili-paste/text', TRUE),
+  (7883, 'Seed Sample Anchovy Pack',    'seed sample anchovy pack',    'TEXT', 'PantrySentry seed data',
+   'https://example.com/pantrysentry/seed/anchovy', 'seed/anchovy/text', FALSE);
 
 -- ------------------------------------------------------------
 -- price_item_reference
@@ -119,9 +119,9 @@ INSERT INTO price_item_reference
    median_price_per_base_unit, price_observation_count, latest_observation_date, source_url)
 VALUES
   (900001, 7882, 'SEED CHILI PASTE JAR 250G', '250 g', 250.0000, 'kg',
-   12.50, 12.80, 12.50, 50.0000, 3, '2026-09-03', 'https://example.com/pantrybuddy/seed/prices'),
+   12.50, 12.80, 12.50, 50.0000, 3, '2026-09-03', 'https://example.com/pantrysentry/seed/prices'),
   (900002, 1,    'SEED STARFRUIT 1KG',        '1kg',   1.0000,   'kg',
-   8.90,  9.10,  8.90,  8.9000,  2, '2026-09-03', 'https://example.com/pantrybuddy/seed/prices');
+   8.90,  9.10,  8.90,  8.9000,  2, '2026-09-03', 'https://example.com/pantrysentry/seed/prices');
 
 -- ------------------------------------------------------------
 -- price_observations
@@ -295,17 +295,17 @@ VALUES
    'A no-cook breakfast bowl that uses ripe tropical fruit and yogurt.',
    2.00, 'bowl', 10, 0, 10, 'EASY', 'Malaysian',
    '["Scoop the papaya and slice the starfruit.", "Toss the fruit with lime juice.", "Spoon over the yogurt and serve chilled."]',
-   'PantryBuddy test kitchen', 'https://example.com/pantrybuddy/recipes/breakfast-bowl', NULL, TRUE),
+   'PantrySentry test kitchen', 'https://example.com/pantrysentry/recipes/breakfast-bowl', NULL, TRUE),
   (2, 'Anchovy Sambal with Water Spinach',
    'Spicy anchovy sambal served with quickly blanched water spinach.',
    4.00, 'serving', 15, 20, 35, 'MEDIUM', 'Malaysian',
    '["Pound the chilli paste and fry it with the anchovy.", "Blanch the water spinach for one minute.", "Fold the sambal through the greens and serve."]',
-   'PantryBuddy test kitchen', 'https://example.com/pantrybuddy/recipes/anchovy-sambal', NULL, TRUE),
+   'PantrySentry test kitchen', 'https://example.com/pantrysentry/recipes/anchovy-sambal', NULL, TRUE),
   (3, 'Lotus Root, Beef and Water Spinach Stir Fry',
    'A home-style stir fry that uses up root vegetables and beef strips.',
    3.00, 'serving', 20, 15, 35, 'MEDIUM', 'Chinese',
    '["Slice the lotus root and beef thinly.", "Sear the beef, then add the lotus root.", "Add the water spinach and oyster sauce and serve."]',
-   'PantryBuddy test kitchen', 'https://example.com/pantrybuddy/recipes/lotus-root-stir-fry', NULL, TRUE);
+   'PantrySentry test kitchen', 'https://example.com/pantrysentry/recipes/lotus-root-stir-fry', NULL, TRUE);
 
 -- ------------------------------------------------------------
 -- recipe_ingredients
@@ -370,22 +370,22 @@ VALUES
    'Residential care home that accepts fresh and shelf-stable food for its kitchen.',
    'No. 12, Jalan SS2/24', 'Petaling Jaya', 'Selangor', '47300',
    3.1178000, 101.6220000, '+60 3-7876 1234', 'donations@srimurni-care.example',
-   'https://example.com/pantrybuddy/centres/sri-murni', 'Mon-Sat 09:00-17:00',
-   'https://example.com/pantrybuddy/verify/sri-murni', TRUE,
+   'https://example.com/pantrysentry/centres/sri-murni', 'Mon-Sat 09:00-17:00',
+   'https://example.com/pantrysentry/verify/sri-murni', TRUE,
    'Fresh fruit and vegetables, sealed dry goods. No opened packaging.', TRUE),
   (2, 'Kuala Lumpur Community Food Bank', 'FOOD_BANK',
    'City-wide food bank with a weekly community distribution.',
    'Jalan Tun Razak', 'Kuala Lumpur', 'Wilayah Persekutuan', '50400',
    3.1730000, 101.7030000, '+60 3-2110 5678', 'hello@klfoodbank.example',
-   'https://example.com/pantrybuddy/centres/kl-food-bank', 'Mon-Fri 10:00-18:00',
-   'https://example.com/pantrybuddy/verify/kl-food-bank', TRUE,
+   'https://example.com/pantrysentry/centres/kl-food-bank', 'Mon-Fri 10:00-18:00',
+   'https://example.com/pantrysentry/verify/kl-food-bank', TRUE,
    'Canned and packaged food only. Check the expiry date on arrival.', TRUE),
   (3, 'Penang Community Fridge', 'COMMUNITY_FRIDGE',
    'Open community fridge where neighbours share surplus food.',
    'Lebuh Campbell', 'George Town', 'Penang', '10100',
    5.4141000, 100.3292000, NULL, 'penangfridge@example.com',
-   'https://example.com/pantrybuddy/centres/penang-fridge', 'Daily 08:00-22:00',
-   'https://example.com/pantrybuddy/verify/penang-fridge', FALSE,
+   'https://example.com/pantrysentry/centres/penang-fridge', 'Daily 08:00-22:00',
+   'https://example.com/pantrysentry/verify/penang-fridge', FALSE,
    'Whole fruit, bread and unopened chilled items.', TRUE);
 
 -- ------------------------------------------------------------
@@ -462,13 +462,13 @@ VALUES
 INSERT INTO quantity_conversions
   (conversion_id, reference_id, from_unit, to_unit, factor, is_assumed, source_name, source_url, notes, is_active)
 VALUES
-  (1, NULL, 'dozen', 'pcs', 12.00000000, TRUE,  'PantryBuddy unit policy', NULL, 'Standard dozen conversion used by the app.', TRUE),
-  (2, NULL, 'g',     'kg',  0.00100000,  TRUE,  'PantryBuddy unit policy', NULL, 'Metric mass conversion.', TRUE),
-  (3, NULL, 'ml',    'L',   0.00100000,  TRUE,  'PantryBuddy unit policy', NULL, 'Metric volume conversion.', TRUE),
-  (4, 2,    'pcs',   'kg',  0.50000000,  FALSE, 'PantryBuddy test kitchen',
-   'https://example.com/pantrybuddy/conversions/papaya', 'Average papaya fruit weighs 0.5 kg.', TRUE),
-  (5, 4,    'pcs',   'kg',  0.15000000,  TRUE,  'PantryBuddy test kitchen',
-   'https://example.com/pantrybuddy/conversions/sapodilla', 'Assumed average sapodilla fruit weight.', TRUE);
+  (1, NULL, 'dozen', 'pcs', 12.00000000, TRUE,  'PantrySentry unit policy', NULL, 'Standard dozen conversion used by the app.', TRUE),
+  (2, NULL, 'g',     'kg',  0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric mass conversion.', TRUE),
+  (3, NULL, 'ml',    'L',   0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric volume conversion.', TRUE),
+  (4, 2,    'pcs',   'kg',  0.50000000,  FALSE, 'PantrySentry test kitchen',
+   'https://example.com/pantrysentry/conversions/papaya', 'Average papaya fruit weighs 0.5 kg.', TRUE),
+  (5, 4,    'pcs',   'kg',  0.15000000,  TRUE,  'PantrySentry test kitchen',
+   'https://example.com/pantrysentry/conversions/sapodilla', 'Assumed average sapodilla fruit weight.', TRUE);
 
 -- ------------------------------------------------------------
 -- waste_impact_assessments

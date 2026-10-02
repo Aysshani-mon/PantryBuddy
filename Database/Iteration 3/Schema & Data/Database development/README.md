@@ -1,10 +1,10 @@
-# PantryBuddy - Household Inventory Reminder System (Iteration 3)
+# PantrySentry - Household Inventory Reminder System (Iteration 3)
 
-Iteration 3 extends the PantryBuddy database with the food-waste-reduction features of the third project iteration: recipe suggestions (Epic 6), food donation (Epic 7) and environmental impact reporting (Epic 8). The database now holds **28 tables**: the 17 tables of Iteration 1 and Iteration 2 plus 11 new tables.
+Iteration 3 extends the PantrySentry database with the food-waste-reduction features of the third project iteration: recipe suggestions (Epic 6), food donation (Epic 7) and environmental impact reporting (Epic 8). The database now holds **28 tables**: the 17 tables of Iteration 1 and Iteration 2 plus 11 new tables.
 
 ## Project Background and Iteration 3 Goals
 
-PantryBuddy helps households track pantry stock, notice food that is about to expire and act before it is wasted. Iteration 1 delivered the inventory core, Iteration 2 added recognition, security questions and public price references. Iteration 3 closes the loop with three goals:
+PantrySentry helps households track pantry stock, notice food that is about to expire and act before it is wasted. Iteration 1 delivered the inventory core, Iteration 2 added recognition, security questions and public price references. Iteration 3 closes the loop with three goals:
 
 1. **Epic 6 - cook what expires first:** suggest recipes that consume the stock closest to expiry, show which ingredients are available or missing, and record the cooking session with a safe stock deduction.
 2. **Epic 7 - donate instead of discarding:** find donation centres, submit a donation request without changing stock, and only deduct stock (and write a `DONATE` transaction) when the donation is actually completed.
@@ -143,9 +143,19 @@ Donated items are therefore **not counted as consumed food and not counted as wa
 - Restrict TiDB Cloud credentials to the minimum required privileges, rotate them regularly, and prefer the read-only endpoint for reporting queries.
 - `insert_static_data.sql` contains public open data (USDA FoodKeeper, Open Food Facts, Malaysia PriceCatcher under CC BY 4.0). Keep the attribution columns (`source_name`, `source_url`, `source_locator`) intact when re-importing.
 
-## Note on the Possible Rename to PantryBrain
+## Project Rename to PantrySentry
 
-The project may be renamed from **PantryBuddy** to **PantryBrain** in a later iteration. The Iteration 3 schema keeps the database name `Real_ProjectV3.0_TM06` and avoids embedding the product name in table, column, index or constraint names, so a future rename does not require a database migration. Only documentation strings and example URLs would change.
+The project name changed from **PantryBuddy** to **PantrySentry**. The Iteration 3 files use the new name everywhere they are free to do so:
+
+- `README.md` (title, background, Epic descriptions, impact notes and attribution);
+- SQL header comments and example URLs in `schema.sql`, `seed_data.sql` and `test_data.sql`;
+- seed values such as `source_name = 'PantrySentry test kitchen'`, `'PantrySentry unit policy'` and `'PantrySentry seed data'`, plus the example URLs under `https://example.com/pantrysentry/`.
+
+The rename needs **no database migration**:
+
+- The database name `Real_ProjectV3.0_TM06` never contained the product name, and no table, column, index, unique key or foreign key name embeds it either.
+- `insert_static_data.sql` is still the byte-for-byte copy of the Iteration 2 production file, so it still contains the 402 occurrences of the old product name that came from the data team's source values (for example `product_keyword_mapping.source_name = 'PantryBuddy approved catalogue; identity retained from USDA FSIS FoodKeeper Data'` and `product_reference.description = 'Existing PantryBuddy catalogue product; unchanged identity'`). Those are data values, not schema objects, so they do not affect lookup, pricing or reporting logic. Renaming them would break byte-identity with Iteration 2 and with the source CSVs; do it only with data-team agreement, and keep the CSV and SQL in step.
+- Iteration 1 and Iteration 2 files are read-only and keep their original wording.
 
 ## Verification SQL
 
@@ -208,6 +218,6 @@ ORDER BY footprint DESC;
 
 ## Reference
 
-- Iteration 1 static data source: USDA FSIS FoodKeeper open data and the PantryBuddy catalogue.
+- Iteration 1 static data source: USDA FSIS FoodKeeper open data and the PantrySentry catalogue.
 - Iteration 2 recognition and price data: Open Food Facts taxonomy plus Malaysia PriceCatcher (open.dosm.gov.my, CC BY 4.0).
 - Iteration 3 emission factors in the seed data are illustrative values modelled on Poore and Nemecek (2018) as published by Our World in Data; replace them with the approved factor set before production use.

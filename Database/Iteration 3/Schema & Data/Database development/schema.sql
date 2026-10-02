@@ -1,5 +1,5 @@
 -- ============================================================
--- PantryBuddy - Household Inventory Reminder System
+-- PantrySentry - Household Inventory Reminder System
 -- Iteration 3
 -- MySQL Database Schema (schema.sql)
 --
@@ -428,7 +428,7 @@ CREATE TABLE product_keyword_mapping (
 -- ------------------------------------------------------------
 -- 16. price_item_reference  (Iteration 2)
 --     Link between a PriceCatcher priced item, its package unit and
---     a PantryBuddy product_reference row, including the calculated
+--     a PantrySentry product_reference row, including the calculated
 --     reference prices used by the application.
 --     item_code identifies one PriceCatcher item and unit.
 -- ------------------------------------------------------------
