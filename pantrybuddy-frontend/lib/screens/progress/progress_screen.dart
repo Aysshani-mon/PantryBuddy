@@ -6,7 +6,6 @@ import '../../services/insights_service.dart';
 import '../../services/price_estimate_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/trend_chart.dart';
-import '../../widgets/environmental_impact_card.dart';
 
 const _categoryEmoji = <ProductCategory, String>{
   ProductCategory.dairy: '🥛',
@@ -35,7 +34,6 @@ const _categoryEmoji = <ProductCategory, String>{
 /// 5.4 — the suggestion cards (forward-looking action tips +
 /// reason-based recommended changes).
 /// 5.5 — estimated value card.
-/// Epic 8 — environmental impact card (server-calculated CO2e).
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key, required this.appState});
   final AppState appState;
@@ -183,14 +181,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
         ],
       ),
       const SizedBox(height: 16),
-      EnvironmentalImpactCard(
-        appState: state,
-        range: range,
-        previousRange: InsightsService.shift(range, _period, forward: false),
-        period: _period,
-        wasteSignature: _wasteSignature(items),
-      ),
-      const SizedBox(height: 16),
       _buildDiscardReasonCard(reasonBreakdown),
       const SizedBox(height: 16),
       _buildActionTipsCard(actionTips),
@@ -198,13 +188,6 @@ class _ProgressScreenState extends State<ProgressScreen> {
       _buildRecommendedChangesCard(recommendedChanges),
     ];
   }
-
-  /// Changes whenever a discarded item is added, removed or edited — lets
-  /// the environmental impact card refetch only when the underlying
-  /// waste data actually changed, not on every polling rebuild.
-  int _wasteSignature(List<FoodItem> items) => Object.hashAll(items
-      .where((i) => i.disposition == ItemDisposition.discarded)
-      .map((i) => Object.hash(i.id, i.resolvedAt, i.quantity, i.unit, i.category)));
 
   Widget _buildStatCardsRow(PeriodSummary summary) {
     Widget statCard(String label, int value, Color color, Color fill) {

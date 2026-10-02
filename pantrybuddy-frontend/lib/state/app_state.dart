@@ -608,12 +608,12 @@ class AppState extends ChangeNotifier {
   /// Read-only pass-through (changes no state, so no notifyListeners) —
   /// see [EnvironmentalImpactRepository]. Returns the pending state if
   /// there's no household yet.
-  Future<EnvironmentalImpact> getEnvironmentalImpact({required DateRange range, required DateRange previous}) {
+  Future<EnvironmentalImpact> getEnvironmentalImpact({required DateRange range, required List<DateTime> trendStarts}) {
     if (currentHousehold == null) return Future.value(const EnvironmentalImpact.pending());
     return environmentalImpactRepo.getEnvironmentalImpact(
       householdId: currentHousehold!.id,
       range: range,
-      previous: previous,
+      trendStarts: trendStarts,
     );
   }
 

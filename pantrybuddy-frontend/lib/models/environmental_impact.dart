@@ -36,18 +36,35 @@ class CategoryImpact {
       );
 }
 
-class DailyImpact {
-  const DailyImpact({required this.date, required this.kgCo2e});
-  /// The user's local calendar day (no time-of-day) — the server already
-  /// grouped by local day using the offset the app sent, so this is
-  /// parsed as a plain date, NOT through the UTC timestamp parser.
-  final DateTime date;
+/// One bar of the trend chart — the total for one week or month.
+/// The last entry is always the selected period itself.
+class ImpactPeriodTotal {
+  const ImpactPeriodTotal({
+    required this.start,
+    required this.end,
+    required this.kgCo2e,
+    required this.hasActivity,
+    required this.isComplete,
+  });
+  final DateTime start;
+  final DateTime end;
   final double kgCo2e;
+  /// Any item consumed/discarded/donated in this period — false means
+  /// "no data", which is different from a real zero-waste period.
+  final bool hasActivity;
+  /// False for a period that hasn't finished yet (e.g. this week).
+  final bool isComplete;
 
-  factory DailyImpact.fromJson(Map<String, dynamic> json) {
-    final parts = (json['date'] as String).split('-').map(int.parse).toList();
-    return DailyImpact(date: DateTime(parts[0], parts[1], parts[2]), kgCo2e: (json['kgCo2e'] as num).toDouble());
-  }
+  // These are genuine UTC instants sent with a 'Z' (toISOString on the
+  // server), so a plain parse + toLocal is correct here — unlike the
+  // zone-less DATETIME strings handled by _parseServerDateTime.
+  factory ImpactPeriodTotal.fromJson(Map<String, dynamic> json) => ImpactPeriodTotal(
+        start: DateTime.parse(json['start'] as String).toLocal(),
+        end: DateTime.parse(json['end'] as String).toLocal(),
+        kgCo2e: (json['kgCo2e'] as num).toDouble(),
+        hasActivity: json['hasActivity'] as bool,
+        isComplete: json['isComplete'] as bool,
+      );
 }
 
 class ImpactItem {
@@ -100,13 +117,17 @@ class EnvironmentalImpact {
     this.totalKgCo2e = 0,
     this.totalKgWasted = 0,
     this.previousTotalKgCo2e,
+    this.isPeriodInProgress = false,
+    this.petrolLitres = 0,
+    this.petrolKgCo2ePerLitre,
+    this.petrolSourceName,
     this.wastedItemCount = 0,
     this.estimatedItemCount = 0,
     this.noFactorCount = 0,
     this.unknownWeightCount = 0,
     this.hasApproximateWeights = false,
     this.byCategory = const [],
-    this.daily = const [],
+    this.trend = const [],
     this.items = const [],
   });
 
@@ -118,6 +139,14 @@ class EnvironmentalImpact {
   /// Same total for the previous period — null when there isn't enough
   /// activity in one of the two periods to compare meaningfully.
   final double? previousTotalKgCo2e;
+  /// The selected period hasn't ended yet — comparisons say "so far".
+  final bool isPeriodInProgress;
+
+  /// The headline comparison (mentor feedback: kg CO2e alone isn't
+  /// relatable) — litres of petrol with the same emissions.
+  final double petrolLitres;
+  final double? petrolKgCo2ePerLitre;
+  final String? petrolSourceName;
   final int wastedItemCount;
   final int estimatedItemCount;
   final int noFactorCount;
@@ -126,7 +155,8 @@ class EnvironmentalImpact {
   /// or an average weight per piece/pack) rather than entered in g/kg.
   final bool hasApproximateWeights;
   final List<CategoryImpact> byCategory;
-  final List<DailyImpact> daily;
+  /// Oldest first; the last entry is the selected period.
+  final List<ImpactPeriodTotal> trend;
   final List<ImpactItem> items;
 
   int get excludedItemCount => noFactorCount + unknownWeightCount;
@@ -137,11 +167,16 @@ class EnvironmentalImpact {
   factory EnvironmentalImpact.fromJson(Map<String, dynamic> json) {
     if (json['status'] == 'pendingData') return const EnvironmentalImpact.pending();
     final excluded = (json['excludedCounts'] as Map<String, dynamic>?) ?? const {};
+    final petrol = (json['petrolEquivalent'] as Map<String, dynamic>?) ?? const {};
     return EnvironmentalImpact(
       status: EnvironmentalImpactStatus.ready,
       totalKgCo2e: (json['totalKgCo2e'] as num).toDouble(),
       totalKgWasted: (json['totalKgWasted'] as num).toDouble(),
       previousTotalKgCo2e: (json['previousTotalKgCo2e'] as num?)?.toDouble(),
+      isPeriodInProgress: json['isPeriodInProgress'] as bool? ?? false,
+      petrolLitres: (petrol['litres'] as num?)?.toDouble() ?? 0,
+      petrolKgCo2ePerLitre: (petrol['kgCo2ePerLitre'] as num?)?.toDouble(),
+      petrolSourceName: petrol['sourceName'] as String?,
       wastedItemCount: json['wastedItemCount'] as int,
       estimatedItemCount: json['estimatedItemCount'] as int,
       noFactorCount: (excluded['noFactor'] as int?) ?? 0,
@@ -150,7 +185,9 @@ class EnvironmentalImpact {
       byCategory: ((json['byCategory'] as List?) ?? const [])
           .map((e) => CategoryImpact.fromJson(e as Map<String, dynamic>))
           .toList(),
-      daily: ((json['daily'] as List?) ?? const []).map((e) => DailyImpact.fromJson(e as Map<String, dynamic>)).toList(),
+      trend: ((json['trend'] as List?) ?? const [])
+          .map((e) => ImpactPeriodTotal.fromJson(e as Map<String, dynamic>))
+          .toList(),
       items: ((json['items'] as List?) ?? const []).map((e) => ImpactItem.fromJson(e as Map<String, dynamic>)).toList(),
     );
   }

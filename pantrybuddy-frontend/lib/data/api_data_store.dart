@@ -583,17 +583,15 @@ class ApiDataStore
   Future<EnvironmentalImpact> getEnvironmentalImpact({
     required String householdId,
     required DateRange range,
-    required DateRange previous,
+    required List<DateTime> trendStarts,
   }) async {
-    // Instants go over the wire as UTC (the backend compares against
-    // UTC DATETIME columns); the offset lets the server group the daily
-    // trend by the user's own calendar day.
+    // Instants go over the wire as UTC (the backend compares against UTC
+    // DATETIME columns). The period boundaries themselves are worked out
+    // here, in local time, so "this week" means the user's own week.
     final query = Uri(queryParameters: {
       'start': range.start.toUtc().toIso8601String(),
       'end': range.end.toUtc().toIso8601String(),
-      'previousStart': previous.start.toUtc().toIso8601String(),
-      'previousEnd': previous.end.toUtc().toIso8601String(),
-      'tzOffsetMinutes': '${range.start.timeZoneOffset.inMinutes}',
+      if (trendStarts.isNotEmpty) 'trendStarts': trendStarts.map((t) => t.toUtc().toIso8601String()).join(','),
     }).query;
     final json = await _get('/households/$householdId/environmental-impact?$query');
     return EnvironmentalImpact.fromJson(json as Map<String, dynamic>);

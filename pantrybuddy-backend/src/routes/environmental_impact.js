@@ -4,6 +4,7 @@ const { CATEGORY_DART_NAMES } = require('../util/enums');
 const { assertMember } = require('../util/household_access');
 const { ApiError, asyncHandler } = require('../util/errors');
 const { toKilograms, unitWeightKey } = require('../util/weight');
+const { PETROL_KG_CO2E_PER_LITRE, PETROL_SOURCE_NAME, petrolLitresFor } = require('../util/equivalents');
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ const router = express.Router();
 // can be deployed ahead of the data.
 
 const MAX_RANGE_DAYS = 366;
+const MAX_TREND_PERIODS = 6; // e.g. 4 weeks or 4 months on screen; 6 allows a little headroom
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function parseInstant(value, name) {
@@ -58,11 +60,6 @@ function fromDbDateTime(s) {
   if (s instanceof Date) return s;
   const normalised = String(s).includes('T') ? String(s) : String(s).replace(' ', 'T');
   return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(normalised) ? normalised : `${normalised}Z`);
-}
-
-/** The user's local calendar day for an instant, as 'YYYY-MM-DD'. */
-function localDayKey(date, tzOffsetMinutes) {
-  return new Date(date.getTime() + tzOffsetMinutes * 60000).toISOString().slice(0, 10);
 }
 
 function round(n, dp = 3) {
@@ -132,12 +129,18 @@ function estimateItem(row, ref) {
 }
 
 // GET /households/:householdId/environmental-impact
-//   ?start=<ISO>&end=<ISO>                  current period (inclusive)
-//   &previousStart=<ISO>&previousEnd=<ISO>  optional; defaults to the
-//                                           equal-length window before start
-//   &tzOffsetMinutes=480                    optional; the user's UTC offset,
-//                                           for grouping the daily trend by
-//                                           their local calendar day
+//   ?start=<ISO>&end=<ISO>        the selected period (inclusive)
+//   &trendStarts=<ISO>,<ISO>,...  optional: start instants of the earlier
+//                                 periods to show in the trend, oldest
+//                                 first, all before `start`. Each runs
+//                                 until the next one starts; the last
+//                                 runs until `start`. The client sends
+//                                 these (rather than the server working
+//                                 them out) because calendar weeks/months
+//                                 are in the user's local timezone.
+//
+// The last trend period is also "the previous period" used for the
+// headline comparison.
 router.get('/households/:householdId/environmental-impact', asyncHandler(async (req, res) => {
   await assertMember(req.userId, req.params.householdId);
 
@@ -146,34 +149,38 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
   if (end < start) throw new ApiError(400, 'end must be after start.');
   if (end - start > MAX_RANGE_DAYS * DAY_MS) throw new ApiError(400, `The period can be at most ${MAX_RANGE_DAYS} days.`);
 
-  let previousStart;
-  let previousEnd;
-  if (req.query.previousStart !== undefined || req.query.previousEnd !== undefined) {
-    previousStart = parseInstant(req.query.previousStart, 'previousStart');
-    previousEnd = parseInstant(req.query.previousEnd, 'previousEnd');
-    if (previousEnd < previousStart) throw new ApiError(400, 'previousEnd must be after previousStart.');
-    if (previousEnd >= start) throw new ApiError(400, 'The previous period must end before the current one starts.');
-    if (previousEnd - previousStart > MAX_RANGE_DAYS * DAY_MS) {
-      throw new ApiError(400, `The previous period can be at most ${MAX_RANGE_DAYS} days.`);
-    }
-  } else {
-    previousEnd = new Date(start.getTime() - 1);
-    previousStart = new Date(start.getTime() - (end.getTime() - start.getTime()) - 1);
+  const trendStarts = req.query.trendStarts === undefined || req.query.trendStarts === ''
+    ? []
+    : String(req.query.trendStarts).split(',').map((v, i) => parseInstant(v, `trendStarts[${i}]`));
+  if (trendStarts.length > MAX_TREND_PERIODS - 1) {
+    throw new ApiError(400, `trendStarts can have at most ${MAX_TREND_PERIODS - 1} entries.`);
+  }
+  for (let i = 0; i < trendStarts.length; i++) {
+    const next = i + 1 < trendStarts.length ? trendStarts[i + 1] : start;
+    if (!(trendStarts[i] < next)) throw new ApiError(400, 'trendStarts must be in ascending order and before start.');
+  }
+  const earliest = trendStarts.length > 0 ? trendStarts[0] : start;
+  if (end - earliest > (MAX_RANGE_DAYS + 40) * DAY_MS) {
+    throw new ApiError(400, 'The trend covers too long a time span.');
   }
 
-  const tzOffsetMinutes = req.query.tzOffsetMinutes === undefined ? 0 : Number(req.query.tzOffsetMinutes);
-  if (!Number.isInteger(tzOffsetMinutes) || Math.abs(tzOffsetMinutes) > 14 * 60) {
-    throw new ApiError(400, 'tzOffsetMinutes must be a whole number of minutes between -840 and 840.');
-  }
+  // Periods oldest -> newest; the last one is the selected period.
+  const periods = [
+    ...trendStarts.map((s, i) => ({
+      start: s,
+      end: new Date((i + 1 < trendStarts.length ? trendStarts[i + 1] : start).getTime() - 1),
+    })),
+    { start, end },
+  ].map((p) => ({ ...p, kgCo2e: 0, hasActivity: false }));
 
   const ref = await loadReferenceData();
   if (!ref) {
     return res.json({ status: 'pendingData' });
   }
 
-  // Every resolved item across both periods in one query. Non-discarded
-  // items are only used to tell "no activity at all" apart from "a real
-  // zero-waste period" for the comparison below.
+  // Every resolved item across all periods in one query. Non-discarded
+  // items only tell "no activity at all" apart from "a real zero-waste
+  // period", so a comparison is never made against an empty period.
   const [rows] = await pool.query(
     `SELECT ii.inventory_item_id, ii.quantity, ii.unit, ii.status, ii.checkout_date,
             p.product_name, p.category_id, pc.category_name, pr.reference_id
@@ -184,7 +191,7 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
      WHERE ii.team_id = ?
        AND ii.status IN ('CONSUMED', 'DISCARDED', 'DONATED')
        AND ii.checkout_date BETWEEN ? AND ?`,
-    [req.params.householdId, toDbDateTime(previousStart < start ? previousStart : start), toDbDateTime(end)]
+    [req.params.householdId, toDbDateTime(earliest), toDbDateTime(end)]
   );
 
   // The LEFT JOIN can repeat an item if a product has several reference
@@ -192,27 +199,20 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
   const seen = new Set();
   const uniqueRows = rows.filter((r) => (seen.has(r.inventory_item_id) ? false : seen.add(r.inventory_item_id)));
 
-  const inRange = (t, a, b) => t >= a && t <= b;
-  let hasCurrentActivity = false;
-  let hasPreviousActivity = false;
-  let previousTotal = 0;
-
+  const current = periods[periods.length - 1];
   const items = [];
   const byCategory = new Map();
-  const daily = new Map();
 
   for (const row of uniqueRows) {
     const resolvedAt = fromDbDateTime(row.checkout_date);
-    const isCurrent = inRange(resolvedAt, start, end);
-    const isPrevious = inRange(resolvedAt, previousStart, previousEnd);
-    if (isCurrent) hasCurrentActivity = true;
-    if (isPrevious) hasPreviousActivity = true;
+    const period = periods.find((p) => resolvedAt >= p.start && resolvedAt <= p.end);
+    if (!period) continue;
+    period.hasActivity = true;
     if (row.status !== 'DISCARDED') continue;
 
     const estimate = estimateItem(row, ref);
-
-    if (isPrevious && estimate.status === 'estimated') previousTotal += estimate.kgCo2e;
-    if (!isCurrent) continue;
+    if (estimate.status === 'estimated') period.kgCo2e += estimate.kgCo2e;
+    if (period !== current) continue;
 
     const category = CATEGORY_DART_NAMES[row.category_name] ?? 'shelfStableFoods';
     items.push({
@@ -237,25 +237,12 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
     c.kgWasted += estimate.kgWasted;
     c.itemCount += 1;
     byCategory.set(category, c);
-
-    const day = localDayKey(resolvedAt, tzOffsetMinutes);
-    daily.set(day, (daily.get(day) || 0) + estimate.kgCo2e);
-  }
-
-  // One entry per local calendar day in the period, real zeros included,
-  // but no entries for days that haven't happened yet (same rule as the
-  // existing trend chart, AC 5.3.7).
-  const dailySeries = [];
-  const lastDay = localDayKey(new Date(Math.min(end.getTime(), Date.now())), tzOffsetMinutes);
-  let cursor = new Date(`${localDayKey(start, tzOffsetMinutes)}T00:00:00Z`);
-  while (cursor.toISOString().slice(0, 10) <= lastDay) {
-    const key = cursor.toISOString().slice(0, 10);
-    dailySeries.push({ date: key, kgCo2e: round(daily.get(key) || 0) });
-    cursor = new Date(cursor.getTime() + DAY_MS);
   }
 
   const estimated = items.filter((i) => i.status === 'estimated');
-  const total = estimated.reduce((sum, i) => sum + i.kgCo2e, 0);
+  const total = current.kgCo2e;
+  const previous = periods.length > 1 ? periods[periods.length - 2] : null;
+  const now = new Date();
 
   res.json({
     status: 'ready',
@@ -263,9 +250,18 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
     totalKgWasted: round(estimated.reduce((sum, i) => sum + i.kgWasted, 0)),
     // null = nothing meaningful to compare against (no resolved items in
     // one of the two periods) — the same rule that fixed the Iteration 2
-    // "400% more waste" bug. Compared as an absolute kg difference, not
-    // a percentage, so a near-zero previous period can't blow it up.
-    previousTotalKgCo2e: hasCurrentActivity && hasPreviousActivity ? round(previousTotal) : null,
+    // "400% more waste" bug. Compared as an absolute kg difference, not a
+    // percentage, so a near-zero previous period can't blow it up.
+    previousTotalKgCo2e: previous && previous.hasActivity && current.hasActivity ? round(previous.kgCo2e) : null,
+    // The selected period hasn't finished yet (e.g. "this week" on a
+    // Wednesday) — the UI says "so far" so a half-finished week isn't
+    // presented as an improvement over a full one.
+    isPeriodInProgress: end > now,
+    petrolEquivalent: {
+      litres: round(petrolLitresFor(total), 2),
+      kgCo2ePerLitre: PETROL_KG_CO2E_PER_LITRE,
+      sourceName: PETROL_SOURCE_NAME,
+    },
     wastedItemCount: items.length,
     estimatedItemCount: estimated.length,
     excludedCounts: {
@@ -276,10 +272,16 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
     byCategory: [...byCategory.values()]
       .map((c) => ({ ...c, kgCo2e: round(c.kgCo2e), kgWasted: round(c.kgWasted) }))
       .sort((a, b) => b.kgCo2e - a.kgCo2e),
-    daily: dailySeries,
+    trend: periods.map((p) => ({
+      start: p.start.toISOString(),
+      end: p.end.toISOString(),
+      kgCo2e: round(p.kgCo2e),
+      hasActivity: p.hasActivity,
+      isComplete: p.end <= now,
+    })),
     items: items.sort((a, b) => (b.kgCo2e ?? -1) - (a.kgCo2e ?? -1)),
   });
 }));
 
 module.exports = router;
-module.exports._internal = { estimateItem, localDayKey, fromDbDateTime, toDbDateTime };
+module.exports._internal = { estimateItem, fromDbDateTime, toDbDateTime };

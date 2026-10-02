@@ -179,12 +179,14 @@ abstract class RecognitionRepository {
 /// Calculated on the backend (not in Flutter) so the emission-factor
 /// reference data and the formula live in one place.
 abstract class EnvironmentalImpactRepository {
-  /// [previous] is the period to compare against (e.g. last week/month).
-  /// Returns [EnvironmentalImpactStatus.pendingData] rather than throwing
-  /// while the reference data hasn't been loaded yet.
+  /// [trendStarts] are the start instants of the earlier periods shown
+  /// in the trend chart, oldest first (the last one is also "the previous
+  /// period" for the headline comparison). Returns
+  /// [EnvironmentalImpactStatus.pendingData] rather than throwing while
+  /// the reference data hasn't been loaded yet.
   Future<EnvironmentalImpact> getEnvironmentalImpact({
     required String householdId,
     required DateRange range,
-    required DateRange previous,
+    required List<DateTime> trendStarts,
   });
 }
