@@ -604,7 +604,7 @@ CREATE TABLE recipe_cook_session_items (
 --     Donation drop-off points. Simplified after data-team review:
 --     no address_line2, no country, no accepts_food_donations and no
 --     accepted_categories; verification_source_url is included and
---     requires_declaration is kept.
+--     requires_declaration is not part of this table.
 -- ------------------------------------------------------------
 CREATE TABLE donation_centres (
   centre_id               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -623,7 +623,6 @@ CREATE TABLE donation_centres (
   website_url             VARCHAR(1000)   NULL,
   operating_hours         VARCHAR(500)    NULL,
   verification_source_url VARCHAR(1000)   NULL,
-  requires_declaration    BOOLEAN         NOT NULL DEFAULT TRUE,
   donation_requirements   TEXT            NULL,
   is_active               BOOLEAN         NOT NULL DEFAULT TRUE,
   created_at              DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -32,7 +32,7 @@ PantrySentry helps households track pantry stock, notice food that is about to e
 
 | # | Table | Purpose |
 | --- | --- | --- |
-| 22 | `donation_centres` | Donation drop-off points with address, coordinates, contact details, opening hours, verification source and declaration requirement. |
+| 22 | `donation_centres` | Donation drop-off points with address, coordinates, contact details, opening hours and verification source. |
 | 23 | `donation_centre_accepted_foods` | Food types a centre accepts, linked to `product_categories`. |
 | 24 | `donation_records` | One donation request per team and centre, with a `PENDING / COMPLETED / CANCELLED` status and drop-off window. |
 | 25 | `donation_record_items` | The stock rows included in a donation, with `UNIQUE (donation_id, inventory_item_id)` and an optional `transaction_id` filled only when the donation is completed. |
@@ -48,7 +48,7 @@ PantrySentry helps households track pantry stock, notice food that is about to e
 ### Data-team feedback applied to Epic 7
 
 - The earlier **`donation_centre_needs`** draft was **renamed to `donation_centre_accepted_foods`** and simplified to exactly **8 columns**: `need_id`, `centre_id`, `category_id`, `item_name`, `notes`, `is_active`, `created_at`, `updated_at`.
-- **`donation_centres`** was simplified as requested: `address_line2`, `country`, `accepts_food_donations` and `accepted_categories` were **removed**, **`verification_source_url` was added**, and `requires_declaration` was **kept**. The table has 19 columns.
+- **`donation_centres`** was simplified as requested: `address_line2`, `country`, `accepts_food_donations` and `accepted_categories` were **removed**, **`verification_source_url` was added**, and `requires_declaration` was **removed in the final data-team review**. The table has 19 columns.
 - Accepted foods are stored per centre in `donation_centre_accepted_foods`, so a centre can accept several categories without duplicating them inside `donation_centres`.
 
 ## Files
@@ -184,15 +184,16 @@ SELECT COUNT(*) FROM product_keyword_mapping; -- 24460 (24463 after the local se
 SELECT COUNT(*) FROM price_item_reference;    -- 284 (286 after the local seed)
 SELECT COUNT(*) FROM price_observations;      -- 2000 (2003 after the local seed)
 
--- 4. Iteration 3 seed data (local only)
-SELECT COUNT(*) FROM recipes;                                  -- 3
-SELECT COUNT(*) FROM recipe_ingredients;                       -- 12
-SELECT COUNT(*) FROM donation_centres;                         -- 3
-SELECT COUNT(*) FROM donation_centre_accepted_foods;           -- 6
-SELECT COUNT(*) FROM donation_records WHERE status = 'PENDING';-- 1
-SELECT COUNT(*) FROM emission_factors;                         -- 4
-SELECT COUNT(*) FROM quantity_conversions;                      -- 5
-SELECT COUNT(*) FROM waste_impact_assessments;                 -- 3 (2 ASSESSED, 1 EXCLUDED)
+-- 4. Iteration 3 static data + seed data (values are static + seed, because
+--    seed_data.sql is loaded on top of insert_static_data.sql)
+SELECT COUNT(*) FROM recipes;                                  -- 7258 static + 3 seed = 7261
+SELECT COUNT(*) FROM recipe_ingredients;                       -- 59518 static + 12 seed = 59530
+SELECT COUNT(*) FROM donation_centres;                         -- 27 static + 3 seed = 30
+SELECT COUNT(*) FROM donation_centre_accepted_foods;           -- 190 static + 6 seed = 196
+SELECT COUNT(*) FROM donation_records WHERE status = 'PENDING';-- 1 (seed only; static imports none)
+SELECT COUNT(*) FROM emission_factors;                         -- 1782 static + 4 seed = 1786
+SELECT COUNT(*) FROM quantity_conversions;                      -- 363 static + 3 Epic 6 static + 5 seed = 371
+SELECT COUNT(*) FROM waste_impact_assessments;                 -- 3 seed (2 ASSESSED, 1 EXCLUDED; static imports none)
 
 -- 5. Pending donations must not move stock
 SELECT d.status, dri.inventory_item_id, i.quantity, dri.transaction_id

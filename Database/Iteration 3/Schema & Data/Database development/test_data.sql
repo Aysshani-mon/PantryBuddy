@@ -686,14 +686,14 @@ UNION ALL SELECT 'quantity_conversions', COUNT(*) FROM quantity_conversions
 UNION ALL SELECT 'waste_impact_assessments', COUNT(*) FROM waste_impact_assessments
 ORDER BY table_name;
 
-SELECT IF(COUNT(*) = 3, 'PASS', 'FAIL') AS recipes_check FROM recipes;
-SELECT IF(COUNT(*) = 12, 'PASS', 'FAIL') AS ingredients_check FROM recipe_ingredients;
-SELECT IF(COUNT(*) = 3, 'PASS', 'FAIL') AS donation_centres_check FROM donation_centres;
-SELECT IF(COUNT(*) = 6, 'PASS', 'FAIL') AS accepted_foods_check FROM donation_centre_accepted_foods;
+SELECT IF(COUNT(*) >= 3, 'PASS', 'FAIL') AS recipes_check FROM recipes;
+SELECT IF(COUNT(*) >= 12, 'PASS', 'FAIL') AS ingredients_check FROM recipe_ingredients;
+SELECT IF(COUNT(*) >= 3, 'PASS', 'FAIL') AS donation_centres_check FROM donation_centres;
+SELECT IF(COUNT(*) >= 6, 'PASS', 'FAIL') AS accepted_foods_check FROM donation_centre_accepted_foods;
 SELECT IF(COUNT(*) = 1, 'PASS', 'FAIL') AS pending_donation_check FROM donation_records WHERE status = 'PENDING';
 SELECT IF(COUNT(*) = 2, 'PASS', 'FAIL') AS donation_items_check FROM donation_record_items;
-SELECT IF(COUNT(*) = 4, 'PASS', 'FAIL') AS emission_factors_check FROM emission_factors;
-SELECT IF(COUNT(*) = 5, 'PASS', 'FAIL') AS conversions_check FROM quantity_conversions;
+SELECT IF(COUNT(*) >= 4, 'PASS', 'FAIL') AS emission_factors_check FROM emission_factors;
+SELECT IF(COUNT(*) >= 5, 'PASS', 'FAIL') AS conversions_check FROM quantity_conversions;
 SELECT IF(SUM(assessment_status = 'ASSESSED') = 2 AND SUM(assessment_status = 'EXCLUDED') = 1,
           'PASS', 'FAIL') AS assessment_mix_check FROM waste_impact_assessments;
 SELECT IF(COUNT(*) = 5, 'PASS', 'FAIL') AS epic6_stock_check FROM inventory_items WHERE inventory_item_id BETWEEN 101 AND 105;
@@ -978,7 +978,7 @@ VALUES (1, 101, 1.00, 'pcs');
 
 -- [EXPECTED ERROR] Cannot delete or update a parent row: donation_records
 -- references donation_centres (error 1451)
-DELETE FROM donation_centres WHERE centre_id = 1;
+DELETE FROM donation_centres WHERE centre_id = 900001;
 
 -- [EXPECTED ERROR] Cannot delete or update a parent row:
 -- donation_record_items references inventory_items (error 1451)

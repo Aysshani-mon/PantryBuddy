@@ -364,44 +364,44 @@ VALUES
 INSERT INTO donation_centres
   (centre_id, name, organisation_type, description, address_line1, city, state, postcode,
    latitude, longitude, phone, email, website_url, operating_hours, verification_source_url,
-   requires_declaration, donation_requirements, is_active)
+   donation_requirements, is_active)
 VALUES
-  (1, 'Sri Murni Care Home', 'CARE_HOME',
+  (900001, 'Sri Murni Care Home', 'CARE_HOME',
    'Residential care home that accepts fresh and shelf-stable food for its kitchen.',
    'No. 12, Jalan SS2/24', 'Petaling Jaya', 'Selangor', '47300',
    3.1178000, 101.6220000, '+60 3-7876 1234', 'donations@srimurni-care.example',
    'https://example.com/pantrysentry/centres/sri-murni', 'Mon-Sat 09:00-17:00',
-   'https://example.com/pantrysentry/verify/sri-murni', TRUE,
+   'https://example.com/pantrysentry/verify/sri-murni',
    'Fresh fruit and vegetables, sealed dry goods. No opened packaging.', TRUE),
-  (2, 'Kuala Lumpur Community Food Bank', 'FOOD_BANK',
+  (900002, 'Kuala Lumpur Community Food Bank', 'FOOD_BANK',
    'City-wide food bank with a weekly community distribution.',
    'Jalan Tun Razak', 'Kuala Lumpur', 'Wilayah Persekutuan', '50400',
    3.1730000, 101.7030000, '+60 3-2110 5678', 'hello@klfoodbank.example',
    'https://example.com/pantrysentry/centres/kl-food-bank', 'Mon-Fri 10:00-18:00',
-   'https://example.com/pantrysentry/verify/kl-food-bank', TRUE,
+   'https://example.com/pantrysentry/verify/kl-food-bank',
    'Canned and packaged food only. Check the expiry date on arrival.', TRUE),
-  (3, 'Penang Community Fridge', 'COMMUNITY_FRIDGE',
+  (900003, 'Penang Community Fridge', 'COMMUNITY_FRIDGE',
    'Open community fridge where neighbours share surplus food.',
    'Lebuh Campbell', 'George Town', 'Penang', '10100',
    5.4141000, 100.3292000, NULL, 'penangfridge@example.com',
    'https://example.com/pantrysentry/centres/penang-fridge', 'Daily 08:00-22:00',
-   'https://example.com/pantrysentry/verify/penang-fridge', FALSE,
+   'https://example.com/pantrysentry/verify/penang-fridge',
    'Whole fruit, bread and unopened chilled items.', TRUE);
 
 -- ------------------------------------------------------------
 -- donation_centre_accepted_foods
--- Renamed from the earlier donation_centre_needs draft and reduced to the
--- 8 agreed columns.
+-- Simplified from the earlier needs-style draft to the
+-- donation_centre_accepted_foods table with the 8 agreed columns.
 -- ------------------------------------------------------------
 INSERT INTO donation_centre_accepted_foods
   (need_id, centre_id, category_id, item_name, notes, is_active)
 VALUES
-  (1, 1, 5,  'Fresh fruit',        'Whole fruit only, no cut fruit.', TRUE),
-  (2, 1, 4,  'Leafy vegetables',   'Delivered chilled where possible.', TRUE),
-  (3, 2, 13, 'Canned goods',       'Cans must be undented and in date.', TRUE),
-  (4, 2, 15, 'Rice and dry staples', 'Sealed packets of rice, flour and noodles.', TRUE),
-  (5, 3, 5,  'Whole fruit',        'Any ripe whole fruit is welcome.', TRUE),
-  (6, 3, 12, 'Bread and baked goods', 'Same-day bread only.', FALSE);
+  (900001, 900001, 5,  'Fresh fruit',        'Whole fruit only, no cut fruit.', TRUE),
+  (900002, 900001, 4,  'Leafy vegetables',   'Delivered chilled where possible.', TRUE),
+  (900003, 900002, 13, 'Canned goods',       'Cans must be undented and in date.', TRUE),
+  (900004, 900002, 15, 'Rice and dry staples', 'Sealed packets of rice, flour and noodles.', TRUE),
+  (900005, 900003, 5,  'Whole fruit',        'Any ripe whole fruit is welcome.', TRUE),
+  (900006, 900003, 12, 'Bread and baked goods', 'Same-day bread only.', FALSE);
 
 -- ------------------------------------------------------------
 -- donation_records (one PENDING request for the Epic 7 tests)
@@ -411,7 +411,7 @@ INSERT INTO donation_records
   (donation_id, team_id, centre_id, user_id, status, drop_off_window_start, drop_off_window_end,
    declaration_agreed, donated_at, notes)
 VALUES
-  (1, 1, 1, 1, 'PENDING',
+  (1, 1, 900001, 1, 'PENDING',
    DATE_ADD(DATE_ADD(CURDATE(), INTERVAL 1 DAY), INTERVAL 9 HOUR),
    DATE_ADD(DATE_ADD(CURDATE(), INTERVAL 1 DAY), INTERVAL 17 HOUR),
    TRUE, NULL, 'Seed donation request waiting for drop-off.');
@@ -438,19 +438,19 @@ INSERT INTO emission_factors
   (factor_id, factor_name, category_id, reference_id, food_type, factor_kg_co2e_per_kg,
    source_name, source_url, source_version, publication_date, valid_from, valid_to, region, is_active)
 VALUES
-  (1, 'Meat and processed meat average', 2, NULL, 'Meat (average)', 27.000000,
+  (900001, 'Meat and processed meat average', 2, NULL, 'Meat (average)', 27.000000,
    'Poore and Nemecek (2018), via Our World in Data',
    'https://ourworldindata.org/food-choice-vs-eating-local', '2018-v1', '2018-06-01',
    '2018-06-01', NULL, 'GLOBAL', TRUE),
-  (2, 'Seafood average', 3, NULL, 'Seafood (average)', 6.100000,
+  (900002, 'Seafood average', 3, NULL, 'Seafood (average)', 6.100000,
    'Poore and Nemecek (2018), via Our World in Data',
    'https://ourworldindata.org/food-choice-vs-eating-local', '2018-v1', '2018-06-01',
    '2018-06-01', NULL, 'GLOBAL', TRUE),
-  (3, 'Tropical fruit average', 5, NULL, 'Fruit (tropical average)', 0.400000,
+  (900003, 'Tropical fruit average', 5, NULL, 'Fruit (tropical average)', 0.400000,
    'Poore and Nemecek (2018), via Our World in Data',
    'https://ourworldindata.org/food-choice-vs-eating-local', '2018-v1', '2018-06-01',
    '2018-06-01', NULL, 'GLOBAL', TRUE),
-  (4, 'Shelf-stable grains and dry staples', 15, NULL, 'Grains and dry staples', 1.400000,
+  (900004, 'Shelf-stable grains and dry staples', 15, NULL, 'Grains and dry staples', 1.400000,
    'Poore and Nemecek (2018), via Our World in Data',
    'https://ourworldindata.org/food-choice-vs-eating-local', '2018-v1', '2018-06-01',
    '2018-06-01', NULL, 'GLOBAL', TRUE);
@@ -462,12 +462,12 @@ VALUES
 INSERT INTO quantity_conversions
   (conversion_id, reference_id, from_unit, to_unit, factor, is_assumed, source_name, source_url, notes, is_active)
 VALUES
-  (1, NULL, 'dozen', 'pcs', 12.00000000, TRUE,  'PantrySentry unit policy', NULL, 'Standard dozen conversion used by the app.', TRUE),
-  (2, NULL, 'g',     'kg',  0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric mass conversion.', TRUE),
-  (3, NULL, 'ml',    'L',   0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric volume conversion.', TRUE),
-  (4, 2,    'pcs',   'kg',  0.50000000,  FALSE, 'PantrySentry test kitchen',
+  (900001, NULL, 'dozen', 'pcs', 12.00000000, TRUE,  'PantrySentry unit policy', NULL, 'Standard dozen conversion used by the app.', TRUE),
+  (900002, NULL, 'g',     'kg',  0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric mass conversion.', TRUE),
+  (900003, NULL, 'ml',    'L',   0.00100000,  TRUE,  'PantrySentry unit policy', NULL, 'Metric volume conversion.', TRUE),
+  (900004, 2,    'pcs',   'kg',  0.50000000,  FALSE, 'PantrySentry test kitchen',
    'https://example.com/pantrysentry/conversions/papaya', 'Average papaya fruit weighs 0.5 kg.', TRUE),
-  (5, 4,    'pcs',   'kg',  0.15000000,  TRUE,  'PantrySentry test kitchen',
+  (900005, 4,    'pcs',   'kg',  0.15000000,  TRUE,  'PantrySentry test kitchen',
    'https://example.com/pantrysentry/conversions/sapodilla', 'Assumed average sapodilla fruit weight.', TRUE);
 
 -- ------------------------------------------------------------
@@ -483,11 +483,11 @@ INSERT INTO waste_impact_assessments
    calculation_method_version, footprint_kg_co2e, assessment_status, exclusion_reason,
    calculation_notes, discarded_at, assessed_at)
 VALUES
-  (1, 2, 6, 11, 2, 2, 5, 2.000, 'pcs', 1.000000, 4, 3,
+  (1, 2, 6, 11, 2, 2, 5, 2.000, 'pcs', 1.000000, 900004, 900003,
    0.400000, 'Poore and Nemecek (2018), via Our World in Data', '2018-v1', 'v1',
    0.400000, 'ASSESSED', NULL,
    'Papaya weight converted from pieces with conversion 4.', DATE_SUB(NOW(), INTERVAL 1 DAY), DATE_SUB(NOW(), INTERVAL 1 DAY)),
-  (2, 1, 9, 12, 4, 4, 5, 1.000, 'pcs', 0.150000, 5, 3,
+  (2, 1, 9, 12, 4, 4, 5, 1.000, 'pcs', 0.150000, 900005, 900003,
    0.400000, 'Poore and Nemecek (2018), via Our World in Data', '2018-v1', 'v1',
    0.060000, 'ASSESSED', NULL,
    'Sapodilla weight converted from pieces with conversion 5.', DATE_SUB(NOW(), INTERVAL 3 DAY), DATE_SUB(NOW(), INTERVAL 3 DAY)),
