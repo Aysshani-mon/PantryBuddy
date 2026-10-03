@@ -13,6 +13,7 @@ import '../models/shelf_life_suggestion.dart';
 import '../models/recognition_candidate.dart';
 import '../models/receipt_item_draft.dart';
 import '../models/environmental_impact.dart';
+import '../models/recipe.dart';
 import '../models/insights_data.dart';
 import 'api_config.dart';
 import 'repository.dart';
@@ -55,7 +56,8 @@ class ApiDataStore
         ActivityLogRepository,
         RecognitionRepository,
         ShelfLifeRepository,
-        EnvironmentalImpactRepository {
+        EnvironmentalImpactRepository,
+        RecipeRepository {
   ApiDataStore({this.baseUrl = ApiConfig.baseUrl});
 
   final String baseUrl;
@@ -595,6 +597,39 @@ class ApiDataStore
     }).query;
     final json = await _get('/households/$householdId/environmental-impact?$query');
     return EnvironmentalImpact.fromJson(json as Map<String, dynamic>);
+  }
+
+  // ==================== RecipeRepository ====================
+
+  @override
+  Future<RecipeSuggestions> getRecipeSuggestions({
+    required String householdId,
+    required DateTime today,
+    bool refresh = false,
+  }) async {
+    final query = Uri(queryParameters: {
+      'today': _dateOnly(DateTime(today.year, today.month, today.day)),
+      if (refresh) 'refresh': 'true',
+    }).query;
+    final json = await _get('/households/$householdId/recipe-suggestions?$query');
+    return RecipeSuggestions.fromJson(json as Map<String, dynamic>);
+  }
+
+  @override
+  Future<RecipeUsageResult> recordRecipeUsage({
+    required String householdId,
+    required String submissionId,
+    required String recipeId,
+    required String recipeTitle,
+    required List<IngredientUse> uses,
+  }) async {
+    final json = await _post('/households/$householdId/recipe-usage', {
+      'submissionId': submissionId,
+      'recipeId': recipeId,
+      'recipeTitle': recipeTitle,
+      'ingredients': uses.map((u) => u.toJson()).toList(),
+    });
+    return RecipeUsageResult.fromJson(json as Map<String, dynamic>);
   }
 
   // ==================== RecognitionRepository ====================

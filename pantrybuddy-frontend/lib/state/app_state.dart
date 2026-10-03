@@ -9,6 +9,7 @@ import '../models/reminder.dart';
 import '../models/activity_log_entry.dart';
 import '../models/shelf_life_suggestion.dart';
 import '../models/environmental_impact.dart';
+import '../models/recipe.dart';
 import '../models/insights_data.dart';
 import '../data/repository.dart';
 import '../services/id_service.dart';
@@ -27,6 +28,7 @@ class AppState extends ChangeNotifier {
     required this.shelfLifeRepo,
     required this.recognitionRepo,
     required this.environmentalImpactRepo,
+    required this.recipeRepo,
   });
 
   final UserRepository userRepo;
@@ -37,6 +39,7 @@ class AppState extends ChangeNotifier {
   final ShelfLifeRepository shelfLifeRepo;
   final RecognitionRepository recognitionRepo;
   final EnvironmentalImpactRepository environmentalImpactRepo;
+  final RecipeRepository recipeRepo;
 
   AppUser? currentUser;
   Household? currentHousehold;
@@ -460,6 +463,17 @@ class AppState extends ChangeNotifier {
     await inventoryRepo.updateItem(item);
     await _refreshItemsNow(); // instant feedback instead of waiting for the next poll tick
 
+    // The backend cancels a fully resolved item's reminders in the same
+    // request — re-fetch so they disappear from the Reminders tab now,
+    // not on the next poll. A failure here mustn't undo a successful
+    // resolve, so it's swallowed; the next poll will catch up.
+    if (endedUpFullyResolved) {
+      try {
+        reminders = await reminderRepo.getRemindersForHousehold(currentHousehold!.id);
+        notifyListeners();
+      } catch (_) {}
+    }
+
     // Logged for every real change now, including partial/half — those
     // genuinely change stock now, not just a label, so they're just as
     // worth recording as a full resolve.
@@ -615,6 +629,57 @@ class AppState extends ChangeNotifier {
       range: range,
       trendStarts: trendStarts,
     );
+  }
+
+  // ==================== Recipes (Epic 6) ====================
+
+  /// Read-only — see [RecipeRepository.getRecipeSuggestions].
+  Future<RecipeSuggestions> getRecipeSuggestions({bool refresh = false}) {
+    if (currentHousehold == null) {
+      return Future.value(const RecipeSuggestions(status: RecipeSuggestionsStatus.noInventory, recipes: [], expiringSoonCount: 0));
+    }
+    return recipeRepo.getRecipeSuggestions(householdId: currentHousehold!.id, today: DateTime.now(), refresh: refresh);
+  }
+
+  /// User Story 6.3 — records what a recipe used, then refreshes items and
+  /// reminders so every household screen shows the new quantities and
+  /// statuses straight away (AC 6.3.5 / 6.3.6). [submissionId] must stay
+  /// the same if the user retries the same update (AC 6.3.7).
+  Future<RecipeUsageResult> recordRecipeUsage({
+    required String submissionId,
+    required Recipe recipe,
+    required List<IngredientUse> uses,
+  }) async {
+    if (currentUser == null || currentHousehold == null) {
+      throw AuthException('You need to be in a household to do this.');
+    }
+    final result = await recipeRepo.recordRecipeUsage(
+      householdId: currentHousehold!.id,
+      submissionId: submissionId,
+      recipeId: recipe.id,
+      recipeTitle: recipe.title,
+      uses: uses,
+    );
+    await _refreshItemsNow();
+    try {
+      reminders = await reminderRepo.getRemindersForHousehold(currentHousehold!.id);
+      notifyListeners();
+    } catch (_) {} // the next poll catches up; the usage itself already saved
+
+    // Only log activity the first time — a retry changed nothing.
+    if (!result.alreadyRecorded) {
+      for (final used in result.updated) {
+        await activityRepo.logActivity(ActivityLogEntry(
+          id: IdService.newId('log'),
+          householdId: currentHousehold!.id,
+          actingUserId: currentUser!.id,
+          actingUserName: currentUser!.name,
+          action: ActivityAction.consumed,
+          itemName: used.name,
+        ));
+      }
+    }
+    return result;
   }
 
   // ==================== Sign out ====================

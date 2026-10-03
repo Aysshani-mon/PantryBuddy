@@ -317,6 +317,18 @@ router.post('/inventory-items/:id/resolve', asyncHandler(async (req, res) => {
         [req.params.id, resolvedByUserId, item.quantity]
       );
     }
+
+    // The item has left the inventory (fully consumed, discarded or
+    // donated), so its reminders no longer apply. Cancelled in the same
+    // transaction so an item can never end up resolved with a live
+    // reminder. TRIGGERED ones are included too — the reminders list only
+    // hides CANCELLED rows, so an already-fired reminder for an item that
+    // was then used up would otherwise stay listed.
+    await conn.query(
+      `UPDATE reminders SET status = 'CANCELLED', cancelled_at = NOW()
+       WHERE inventory_item_id = ? AND status IN ('PENDING', 'TRIGGERED')`,
+      [req.params.id]
+    );
     await conn.commit();
 
     const [updatedRows] = await conn.query(`${ITEM_SELECT} WHERE ii.inventory_item_id = ?`, [req.params.id]);

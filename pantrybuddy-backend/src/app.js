@@ -11,6 +11,7 @@ const activityRouter = require('./routes/activity');
 const shelfLifeRouter = require('./routes/shelf_life');
 const recognitionRouter = require('./routes/recognition');
 const environmentalImpactRouter = require('./routes/environmental_impact');
+const recipesRouter = require('./routes/recipes');
 const { ApiError } = require('./util/errors');
 const { requireAuth } = require('./util/auth');
 
@@ -45,6 +46,7 @@ app.use('/', remindersRouter);
 app.use('/', shelfLifeRouter);
 app.use('/', recognitionRouter);
 app.use('/', environmentalImpactRouter);
+app.use('/', recipesRouter);
 
 // 404 handler
 app.use((req, res) => {
