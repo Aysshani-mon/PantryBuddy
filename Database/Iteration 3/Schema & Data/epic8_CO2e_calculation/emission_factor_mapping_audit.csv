@@ -1776,3 +1776,8 @@ reference_id,reference_key,product_name,category_id,mapped_food_type,factor_kg_c
 7877,pricecatcher:1dfea2bb834b,Short/Japanese Mustard Greens/Siow Pak Choy (1Kg),4,Brassicas,0.510000,direct brassica-family match
 7878,pricecatcher:dcce749c62a3,White Radish (1Kg),4,Root Vegetables,0.430000,direct root-vegetable match
 7881,pricecatcher:1c2414611891,Imported Potato (Pakistan),4,Potatoes,0.460000,direct vegetable match
+480,off:en:banana-crisps,Banana crisps,6,Bananas,0.860000,documented representative mapping: banana-based snack → OWID Bananas
+439,off:en:baby-food-jar-with-banana,Baby food jar with banana,11,Bananas,0.860000,documented representative mapping: banana-based baby food → OWID Bananas
+456,off:en:baguettes,Baguettes,12,Wheat & Rye,1.570000,documented representative mapping: wheat-based bread → OWID Wheat & Rye
+1135,off:en:canned-peas,Canned peas,13,Peas,0.980000,documented representative mapping: canned peas → OWID Peas
+526,off:en:bean-dishes,Bean dishes,17,Other Pulses,1.790000,documented representative mapping: bean-based prepared food → OWID Other Pulses
