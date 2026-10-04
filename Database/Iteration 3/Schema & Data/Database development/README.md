@@ -48,7 +48,7 @@ AI generation relationships (dashed edges in the ERD):
 | # | Table | Purpose |
 | --- | --- | --- |
 | 27 | `emission_factors` | CO2e factors per kilogram of food, attached to a category, a specific reference or neither, with source, version and validity window. |
-| 28 | `quantity_conversions` | Unit conversions used to turn a household quantity into kilograms, including product-specific assumed weights. |
+| 28 | `quantity_conversions` | Per-reference conversions for all 7,881 product references: l -> kg, ml -> kg, pcs -> kg, dozen -> kg. Global: g -> kg, kg -> kg, mg -> kg. Epic 6 adds cup/tbsp/tsp. |
 | 29 | `waste_impact_assessments` | One assessment per discarded inventory transaction, with conversion, factor snapshots and the resulting footprint. `transaction_id` is `UNIQUE`. |
 
 ### Data-team feedback applied to Epic 7
@@ -99,7 +99,7 @@ Notes:
 
 ## Static Data Status
 
-`insert_static_data.sql` now contains **both the Iteration 2 static data (byte-for-byte copy) and the Iteration 3 static data delivered by the data team**: 7,258 recipes, 59,518 recipe ingredients, 27 donation centres, 190 accepted foods, 1,782 emission factors and 366 quantity conversions. All data has been verified against the source CSVs and loaded into the TiDB Cloud production database `Real_ProjectV3.0_TM06`.
+`insert_static_data.sql` now contains **both the Iteration 2 static data (byte-for-byte copy) and the Iteration 3 static data delivered by the data team**: 7,258 recipes, 59,518 recipe ingredients, 27 donation centres, 190 accepted foods, 1,782 emission factors and 31,530 quantity conversions (31,527 per-reference Epic 8 rows plus 3 Epic 6 cooking conversions). All data has been verified against the source CSVs and loaded into the TiDB Cloud production database `Real_ProjectV3.0_TM06`.
 
 ## Epic 7 Inventory Flow (important business rule)
 
@@ -118,7 +118,7 @@ Donated items are therefore **not counted as consumed food and not counted as wa
 ## Epic 8 Calculation Rules
 
 1. Take the discarded transaction, its inventory item, its product, its reference and its category.
-2. Convert `discarded_quantity` into kilograms. Use a product-specific `quantity_conversions` row when one exists, otherwise a generic unit conversion (`g -> kg`, `ml -> L`, `dozen -> pcs`).
+2. Convert `discarded_quantity` into kilograms. Use the direct per-reference conversion (`ml -> kg`, `pcs -> kg`, `dozen -> kg`) when the row's reference has one, otherwise a global unit conversion (`g -> kg`, `kg -> kg`, `mg -> kg`). The older chained form (ml -> L -> kg) is no longer needed because the Epic 8 dataset now stores the per-reference result directly.
 3. Look up an active `emission_factors` row for the reference first and fall back to the category.
 4. Persist the factor value and its source into the snapshot columns, then store `footprint_kg_co2e = converted_weight_kg * factor_kg_co2e_per_kg`.
 5. If the conversion or the factor is missing, store the row as `assessment_status = 'EXCLUDED'` with an `exclusion_reason` and a `NULL` footprint. **Never guess a factor**; excluded rows are reported separately and are not silently treated as zero-impact food.
@@ -199,7 +199,7 @@ SELECT COUNT(*) FROM donation_centres;                         -- 27 static + 3 
 SELECT COUNT(*) FROM donation_centre_accepted_foods;           -- 190 static + 6 seed = 196
 SELECT COUNT(*) FROM donation_records WHERE status = 'PENDING';-- 1 (seed only; static imports none)
 SELECT COUNT(*) FROM emission_factors;                         -- 1782 static + 4 seed = 1786
-SELECT COUNT(*) FROM quantity_conversions;                      -- 363 static + 3 Epic 6 static + 5 seed = 371
+SELECT COUNT(*) FROM quantity_conversions;                      -- 31,527 Epic 8 + 3 Epic 6 + 5 seed = 31,535
 SELECT COUNT(*) FROM waste_impact_assessments;                 -- 3 seed (2 ASSESSED, 1 EXCLUDED; static imports none)
 
 -- 5. Pending donations must not move stock
