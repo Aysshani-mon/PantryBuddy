@@ -612,10 +612,13 @@ class _EnvironmentalImpactScreenState extends State<EnvironmentalImpactScreen> {
         detail = '$qty ${item.unit} → $approx${_formatKg(item.kgWasted!)} kg × ${item.emissionFactor} (${item.factorEntity})';
         break;
       case ImpactItemStatus.noFactor:
-        detail = '$qty ${item.unit} · no emission data for ${item.category.label} yet';
+        // Wording from the data team's Epic 8 README for excluded items.
+        detail = '$qty ${item.unit} · environmental impact data is currently unavailable for this item';
         break;
       case ImpactItemStatus.unknownWeight:
-        detail = '$qty ${item.unit} · no average weight for "${item.unit}" in ${item.category.label} yet';
+        // Usually "pcs"/"pack": there's no reliable weight for one piece of
+        // most foods, so the hint tells people how to get it counted.
+        detail = '$qty ${item.unit} · can\'t convert "${item.unit}" to kg for this item yet (entering it in g or kg lets it be counted)';
         break;
     }
     return Padding(
@@ -655,9 +658,9 @@ class _EnvironmentalImpactScreenState extends State<EnvironmentalImpactScreen> {
           '${data.excludedItemCount == 1 ? 'isn\'t' : 'aren\'t'} included.');
     }
     if (data.hasApproximateWeights) {
-      lines.add('Some weights are approximate (items measured in pieces, packs or litres).');
+      lines.add('Some weights are approximate (converted from litres or pieces using a typical density or piece weight).');
     }
-    lines.add('Estimates use each item\'s category, quantity and discard record, and cover the food\'s whole lifecycle, not just landfill.');
+    lines.add('Estimates use each item\'s product, quantity and discard record, and cover the food\'s whole lifecycle, not just landfill.');
     return Text(lines.join(' '), style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600));
   }
 
@@ -676,8 +679,10 @@ class _EnvironmentalImpactScreenState extends State<EnvironmentalImpactScreen> {
             'show the impact of producing food that was never eaten, not only what happens in landfill.\n\n'
             'To make the number easier to picture, we compare it with burning petrol: 1 litre of petrol produces '
             'about $petrolFactor kg CO₂e.\n\n'
-            'Items entered in pieces, packs or litres use an average weight, so those figures are approximate. '
-            'Items we don\'t have data for are left out rather than guessed.\n\n'
+            'Amounts in g or kg are converted exactly. Litres and pieces are converted only where there is a published '
+            'density or typical piece weight for that food (e.g. FAO/INFOODS, FSANZ, PriceCatcher), so those figures are '
+            'approximate. If an item has no reliable conversion or emission factor, it is left out rather than guessed, '
+            'and never counted as zero.\n\n'
             'Sources: Poore, J. & Nemecek, T. (2018), Science 360(6392), 987–992, via Our World in Data. '
             'Petrol factor: ${_data?.petrolSourceName ?? 'DEFRA 2023, as used by MGTC Malaysia'}. '
             'Calculation method adapted from the GHG Protocol.',

@@ -1,12 +1,8 @@
-// Epic 6 — recipe source: Gemini (Google AI Studio free tier).
-//
-// A recipe source has ONE job: given the household's eligible items,
-// propose recipes in the shape below. Everything else (what's eligible,
-// validating IDs, ranking, availability, recording usage) lives in
-// util/recipe_matching.js and routes/recipes.js, so adding the recipe
-// dataset later means adding a sibling file (e.g. recipe_sources/
-// dataset.js) with the same suggestRecipes() signature — nothing else
-// changes.
+// Epic 6 — AI recipe ideas from Gemini (Google AI Studio free tier),
+// shown alongside the recipe dataset's suggestions. This file only
+// proposes recipes; util/ai_recipes.js validates them against the real
+// inventory and saves them into the recipes tables, after which they are
+// matched, ranked and recorded exactly like dataset recipes.
 //
 //   suggestRecipes(items) -> Promise<Array<{
 //     title, description, servings, prepMinutes,
@@ -21,10 +17,10 @@
 //                   being shut down on 16 Oct 2026, so don't pin it).
 
 const { ApiError } = require('../util/errors');
-const { MAX_RECIPES } = require('../util/recipe_matching');
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 const TIMEOUT_MS = 45000;
+const AI_RECIPE_LIMIT = 3; // a few ideas next to the dataset's recipes, not a replacement
 
 // Constrains the reply to valid JSON of exactly this shape (Gemini's
 // structured output), so we never have to scrape recipes out of prose.
@@ -74,7 +70,7 @@ function buildPrompt(items) {
   return [
     'You suggest home-cooking recipes that use up food a household already has, to reduce food waste.',
     '',
-    `Suggest up to ${Math.min(6, MAX_RECIPES)} different, realistic recipes using the household inventory below.`,
+    `Suggest up to ${AI_RECIPE_LIMIT} different, realistic recipes using the household inventory below.`,
     'Rules:',
     '- Prioritise items with the smallest daysUntilExpiry (0-3 days is urgent). Try to use every urgent item in at least one recipe.',
     '- Every recipe must use at least one inventory item.',
@@ -95,7 +91,7 @@ function buildPrompt(items) {
 async function suggestRecipes(items) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new ApiError(503, 'Recipe suggestions are not set up yet (missing GEMINI_API_KEY).');
+    throw new ApiError(503, 'AI recipe ideas are not set up yet (missing GEMINI_API_KEY).');
   }
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
@@ -126,7 +122,7 @@ async function suggestRecipes(items) {
   }
 
   if (response.status === 429) {
-    throw new ApiError(503, 'Recipe suggestions are busy right now (free-tier limit reached). Please try again later.');
+    throw new ApiError(503, 'AI recipe ideas are busy right now (free-tier limit reached). Please try again later.');
   }
   if (!response.ok) {
     // Logged server-side only — the body can contain details we don't
@@ -146,4 +142,8 @@ async function suggestRecipes(items) {
   }
 }
 
-module.exports = { name: 'llm', suggestRecipes, _buildPrompt: buildPrompt };
+function modelName() {
+  return process.env.GEMINI_MODEL || DEFAULT_MODEL;
+}
+
+module.exports = { suggestRecipes, modelName, AI_RECIPE_LIMIT, _buildPrompt: buildPrompt };
