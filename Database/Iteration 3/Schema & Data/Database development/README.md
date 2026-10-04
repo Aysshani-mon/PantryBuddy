@@ -1,6 +1,6 @@
 # PantrySentry - Household Inventory Reminder System (Iteration 3)
 
-Iteration 3 extends the PantrySentry database with the food-waste-reduction features of the third project iteration: recipe suggestions (Epic 6), food donation (Epic 7) and environmental impact reporting (Epic 8). The database now holds **28 tables**: the 17 tables of Iteration 1 and Iteration 2 plus 11 new tables.
+Iteration 3 extends the PantrySentry database with the food-waste-reduction features of the third project iteration: recipe suggestions (Epic 6), food donation (Epic 7) and environmental impact reporting (Epic 8). The database now holds **29 tables**: the 17 tables of Iteration 1 and Iteration 2 plus 12 new tables.
 
 ## Project Background and Iteration 3 Goals
 
@@ -17,9 +17,9 @@ PantrySentry helps households track pantry stock, notice food that is about to e
 - No Iteration 3 statement alters, drops or redefines an Iteration 1 or Iteration 2 table.
 - `insert_static_data.sql` is a byte-for-byte copy of the Iteration 2 file, so the production data model stays compatible with the deployed Iteration 2 static data.
 
-## The 11 New Tables
+## The 12 New Tables
 
-### Epic 6 - Recipe suggestions (4 tables)
+### Epic 6 - Recipe suggestions (5 tables)
 
 | # | Table | Purpose |
 | --- | --- | --- |
@@ -27,23 +27,29 @@ PantrySentry helps households track pantry stock, notice food that is about to e
 | 19 | `recipe_ingredients` | Ingredient lines of a recipe. `reference_id` and `category_id` are optional so free-text ingredients can be stored and matched later. |
 | 20 | `recipe_cook_sessions` | One cooking attempt per team, with `UNIQUE (team_id, idempotency_key)` for safe client retries and a `DRAFT / CONFIRMED / CANCELLED` status. |
 | 21 | `recipe_cook_session_items` | Which stock was used by a session, the planned versus used quantity and the resulting `CONSUME` transaction. `UNIQUE (session_id, inventory_item_id)` prevents double counting. |
+| 22 | `recipe_ai_generations` | Caches Gemini AI-generated recipe suggestions per household to avoid repeated API calls. Fields: team_id, model, input_item_ids (JSON), recipe_ids (JSON), created_by. |
+
+AI generation relationships (dashed edges in the ERD):
+
+- `teams` 1 - N `recipe_ai_generations`: has AI generations (dashed)
+- `users` 1 - N `recipe_ai_generations`: triggers AI generation (dashed)
 
 ### Epic 7 - Food donation (4 tables)
 
 | # | Table | Purpose |
 | --- | --- | --- |
-| 22 | `donation_centres` | Donation drop-off points with address, coordinates, contact details, opening hours and verification source. |
-| 23 | `donation_centre_accepted_foods` | Food types a centre accepts, linked to `product_categories`. |
-| 24 | `donation_records` | One donation request per team and centre, with a `PENDING / COMPLETED / CANCELLED` status and drop-off window. |
-| 25 | `donation_record_items` | The stock rows included in a donation, with `UNIQUE (donation_id, inventory_item_id)` and an optional `transaction_id` filled only when the donation is completed. |
+| 23 | `donation_centres` | Donation drop-off points with address, coordinates, contact details, opening hours and verification source. |
+| 24 | `donation_centre_accepted_foods` | Food types a centre accepts, linked to `product_categories`. |
+| 25 | `donation_records` | One donation request per team and centre, with a `PENDING / COMPLETED / CANCELLED` status and drop-off window. |
+| 26 | `donation_record_items` | The stock rows included in a donation, with `UNIQUE (donation_id, inventory_item_id)` and an optional `transaction_id` filled only when the donation is completed. |
 
 ### Epic 8 - Environmental impact (3 tables)
 
 | # | Table | Purpose |
 | --- | --- | --- |
-| 26 | `emission_factors` | CO2e factors per kilogram of food, attached to a category, a specific reference or neither, with source, version and validity window. |
-| 27 | `quantity_conversions` | Unit conversions used to turn a household quantity into kilograms, including product-specific assumed weights. |
-| 28 | `waste_impact_assessments` | One assessment per discarded inventory transaction, with conversion, factor snapshots and the resulting footprint. `transaction_id` is `UNIQUE`. |
+| 27 | `emission_factors` | CO2e factors per kilogram of food, attached to a category, a specific reference or neither, with source, version and validity window. |
+| 28 | `quantity_conversions` | Unit conversions used to turn a household quantity into kilograms, including product-specific assumed weights. |
+| 29 | `waste_impact_assessments` | One assessment per discarded inventory transaction, with conversion, factor snapshots and the resulting footprint. `transaction_id` is `UNIQUE`. |
 
 ### Data-team feedback applied to Epic 7
 
@@ -55,7 +61,7 @@ PantrySentry helps households track pantry stock, notice food that is about to e
 
 | File | Runs in production | Purpose |
 | --- | --- | --- |
-| `schema.sql` | Yes | Creates the database and all 28 tables (17 existing plus 11 new). |
+| `schema.sql` | Yes | Creates the database and all 29 tables (17 existing plus 12 new). |
 | `insert_static_data.sql` | Yes | Byte-for-byte copy of the Iteration 2 static data file. |
 | `seed_data.sql` | Local only | Iteration 2 development seed data plus Iteration 3 seed data for the new tables. |
 | `test_data.sql` | Local only | Iteration 2 constraint tests plus Iteration 3 acceptance-criteria and constraint tests. |
@@ -82,7 +88,7 @@ Notes:
 
 - `schema.sql` creates and selects `Real_ProjectV3.0_TM06`, so it must run first.
 - `insert_static_data.sql` contains no `USE` statement, so select the database first or pass the database name on the command line.
-- `test_data.sql` intentionally raises errors, so run it with `--force`. Its final scenario drops all 28 tables; re-import the previous scripts afterwards.
+- `test_data.sql` intentionally raises errors, so run it with `--force`. Its final scenario drops all 29 tables; re-import the previous scripts afterwards.
 
 ## Database Naming, Character Set and Engine
 
@@ -93,7 +99,7 @@ Notes:
 
 ## Static Data Status
 
-`insert_static_data.sql` currently contains **only the Iteration 2 static data, copied unchanged** (200 products, 612 shelf-life rules, 7881 product references, 24460 keyword mappings, 284 price items and 2000 price observations). **Iteration 3 static data has not been supplied yet**, so no placeholder rows or TODO comments were added: when the data team delivers recipes, donation centres or emission factors, they will be appended as new sections in this file.
+`insert_static_data.sql` now contains **both the Iteration 2 static data (byte-for-byte copy) and the Iteration 3 static data delivered by the data team**: 7,258 recipes, 59,518 recipe ingredients, 27 donation centres, 190 accepted foods, 1,782 emission factors and 366 quantity conversions. All data has been verified against the source CSVs and loaded into the TiDB Cloud production database `Real_ProjectV3.0_TM06`.
 
 ## Epic 7 Inventory Flow (important business rule)
 
@@ -129,7 +135,7 @@ Donated items are therefore **not counted as consumed food and not counted as wa
 
 ## Migration and Audit Recommendations
 
-- **Do not modify Iteration 1 or Iteration 2 files.** Iteration 3 is applied as an additive migration: create the 11 new tables and leave the 17 existing ones untouched.
+- **Do not modify Iteration 1 or Iteration 2 files.** Iteration 3 is applied as an additive migration: create the 12 new tables and leave the 17 existing ones untouched.
 - Apply the migration on a clone first, compare `SHOW CREATE TABLE` output for the 17 existing tables against the Iteration 2 database, and only then promote it.
 - Keep an audit trail of every stock movement. `inventory_transactions` is the single source of truth for consumption, discard and donation; `recipe_cook_session_items.transaction_id`, `donation_record_items.transaction_id` and `waste_impact_assessments.transaction_id` all point back to it.
 - `waste_impact_assessments` stores factor snapshots (`factor_kg_co2e_per_kg_snapshot`, `factor_source_name_snapshot`, `factor_source_version_snapshot`, `calculation_method_version`). Re-running a report must not rewrite historical numbers when factors are updated.
@@ -160,7 +166,7 @@ The rename needs **no database migration**:
 ## Verification SQL
 
 ```sql
--- 1. All 28 tables exist
+-- 1. All 29 tables exist
 SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE();
 
 -- 2. New table definitions
@@ -175,6 +181,7 @@ SHOW CREATE TABLE donation_record_items;
 SHOW CREATE TABLE emission_factors;
 SHOW CREATE TABLE quantity_conversions;
 SHOW CREATE TABLE waste_impact_assessments;
+SHOW CREATE TABLE recipe_ai_generations;
 
 -- 3. Iteration 2 static data is unchanged
 SELECT COUNT(*) FROM products;                -- 200
