@@ -128,7 +128,7 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
       end: new Date((i + 1 < trendStarts.length ? trendStarts[i + 1] : start).getTime() - 1),
     })),
     { start, end },
-  ].map((p) => ({ ...p, kgCo2e: 0, hasActivity: false }));
+  ].map((p) => ({ ...p, kgCo2e: 0, hasActivity: false, wasted: 0, assessed: 0 }));
 
   // Assess any discard in the whole span that doesn't have an assessment
   // yet. 'pendingData' only if the Epic 8 tables/data aren't there.
@@ -181,7 +181,11 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
     period.hasActivity = true;
     const assessed = row.assessment_status === 'ASSESSED';
     const kgCo2e = assessed ? Number(row.footprint_kg_co2e) : null;
-    if (assessed) period.kgCo2e += kgCo2e;
+    period.wasted += 1;
+    if (assessed) {
+      period.kgCo2e += kgCo2e;
+      period.assessed += 1;
+    }
     if (period !== current) continue;
 
     const category = CATEGORY_DART_NAMES[row.category_name] ?? 'shelfStableFoods';
@@ -199,8 +203,7 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
       status,
       kgWasted: kgWasted === null ? null : round(kgWasted),
       weightBasis: kgWasted === null ? null : weightBasisFor(row.discarded_unit),
-      // A product-specific density or piece weight is an assumption even
-      // when the unit is a volume — surfaced as "approximate" in the UI.
+      // From the conversion row actually used (quantity_conversions.is_assumed).
       weightIsAssumed: Boolean(Number(row.is_assumed)),
       emissionFactor: row.factor_kg_co2e_per_kg_snapshot === null ? null : Number(row.factor_kg_co2e_per_kg_snapshot),
       factorEntity: row.food_type || null,
@@ -220,6 +223,7 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
   const total = current.kgCo2e;
   const previous = periods.length > 1 ? periods[periods.length - 2] : null;
   const now = new Date();
+  const unknownOnly = (p) => p.wasted > 0 && p.assessed === 0;
 
   res.json({
     status: 'ready',
@@ -229,7 +233,10 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
     // one of the two periods) — the same rule that fixed the Iteration 2
     // "400% more waste" bug. Compared as an absolute kg difference, not a
     // percentage, so a near-zero previous period can't blow it up.
-    previousTotalKgCo2e: previous && previous.hasActivity && current.hasActivity ? round(previous.kgCo2e) : null,
+    // Also null when either period had waste that couldn't be estimated
+    // at all — its 0 would be "unknown", not "no impact".
+    previousTotalKgCo2e: previous && previous.hasActivity && current.hasActivity && !unknownOnly(previous) && !unknownOnly(current)
+      ? round(previous.kgCo2e) : null,
     // The selected period hasn't finished yet (e.g. "this week" on a
     // Wednesday) — the UI says "so far" so a half-finished week isn't
     // presented as an improvement over a full one.
@@ -245,14 +252,19 @@ router.get('/households/:householdId/environmental-impact', asyncHandler(async (
       noFactor: items.filter((i) => i.status === 'noFactor').length,
       unknownWeight: items.filter((i) => i.status === 'unknownWeight').length,
     },
-    hasApproximateWeights: estimated.some((i) => i.weightBasis !== 'mass' || i.weightIsAssumed),
+    // True when any counted item's kg came from an assumed conversion
+    // (is_assumed = 1, e.g. a typical piece weight) — the report then says
+    // the figure is "based on assumed values".
+    hasApproximateWeights: estimated.some((i) => i.weightIsAssumed),
     byCategory: [...byCategory.values()]
       .map((c) => ({ ...c, kgCo2e: round(c.kgCo2e), kgWasted: round(c.kgWasted) }))
       .sort((a, b) => b.kgCo2e - a.kgCo2e),
     trend: periods.map((p) => ({
       start: p.start.toISOString(),
       end: p.end.toISOString(),
-      kgCo2e: round(p.kgCo2e),
+      // null = waste happened but none of it could be estimated (shown as
+      // "–", never as a 0 bar).
+      kgCo2e: unknownOnly(p) ? null : round(p.kgCo2e),
       hasActivity: p.hasActivity,
       isComplete: p.end <= now,
     })),

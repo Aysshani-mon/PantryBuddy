@@ -4,9 +4,15 @@
 //
 //   1. One assessment per DISCARD inventory transaction
 //      (waste_impact_assessments.transaction_id is UNIQUE).
-//   2. Convert the discarded quantity to kg using quantity_conversions —
-//      product-specific rows first, then generic ones, chaining where
-//      needed (e.g. dozen -> pcs -> kg, mL -> L -> kg).
+//   2. Convert the discarded quantity to kg with ONE direct
+//      quantity_conversions row (no chaining — the data now has direct
+//      l/ml/pcs/dozen -> kg rows for every product_reference):
+//        a. product-specific row with is_assumed = 0 (measured)
+//        b. product-specific row with is_assumed = 1 (assumed) — still
+//           calculated, but flagged so the report says "based on
+//           assumed values"
+//        c. global row (reference_id NULL: g/kg/mg -> kg) — lowest priority
+//      An item with no reference_id can't be converted -> EXCLUDED.
 //   3. Use the active emission_factors row for the item's reference.
 //   4. Snapshot the factor value/source/version so later factor updates
 //      never rewrite historical numbers.
@@ -25,7 +31,6 @@ const CALCULATION_METHOD_VERSION = 'epic8-v1: kg x factor (no GWP)';
 const REASON_NO_REFERENCE = 'Missing emission factor (product not matched to reference data)';
 const REASON_NO_FACTOR = 'Missing emission factor';
 const REASON_NO_CONVERSION = 'Missing quantity conversion';
-const MAX_CONVERSION_STEPS = 3;
 const BATCH_LIMIT = 500;
 
 /** Units are compared case-insensitively: the Epic 8 data uses 'mL',
@@ -35,44 +40,29 @@ function unitKey(u) {
 }
 
 /**
- * Finds the shortest chain of conversions from [unit] to kg.
- * [edges]: [{ conversionId, referenceId, fromUnit, toUnit, factor, isAssumed }]
- * Product-specific edges are tried before generic ones.
+ * Direct conversion of [quantity] [unit] to kg, following the data team's
+ * priority (see header). [specificEdges] are the item's reference's rows,
+ * [globalEdges] the reference_id NULL rows.
+ * Edge: { conversionId, referenceId, fromUnit, toUnit, factor, isAssumed }
  * Returns { kg, conversionId, isAssumed, path } or null.
  */
-function convertToKg(quantity, unit, edges) {
+function convertToKg(quantity, unit, specificEdges, globalEdges) {
   const q = Number(quantity);
   if (!Number.isFinite(q) || q <= 0) return null;
-  const start = unitKey(unit);
-  if (start === 'kg') return { kg: q, conversionId: null, isAssumed: false, path: ['kg'] };
-
-  const ordered = [...edges].sort((a, b) => (a.referenceId ? 0 : 1) - (b.referenceId ? 0 : 1));
-  let frontier = [{ unit: start, multiplier: 1, steps: [] }];
-  const visited = new Set([start]);
-  for (let depth = 0; depth < MAX_CONVERSION_STEPS && frontier.length > 0; depth++) {
-    const next = [];
-    for (const node of frontier) {
-      for (const edge of ordered) {
-        if (unitKey(edge.fromUnit) !== node.unit) continue;
-        const to = unitKey(edge.toUnit);
-        if (visited.has(to)) continue;
-        const step = { unit: to, multiplier: node.multiplier * Number(edge.factor), steps: [...node.steps, edge] };
-        if (to === 'kg') {
-          const specific = step.steps.find((s) => s.referenceId) || step.steps[step.steps.length - 1];
-          return {
-            kg: q * step.multiplier,
-            conversionId: specific.conversionId,
-            isAssumed: step.steps.some((s) => s.isAssumed),
-            path: [start, ...step.steps.map((s) => unitKey(s.toUnit))],
-          };
-        }
-        visited.add(to);
-        next.push(step);
-      }
-    }
-    frontier = next;
-  }
-  return null;
+  const u = unitKey(unit);
+  const direct = (edges) => edges
+    .filter((e) => unitKey(e.fromUnit) === u && unitKey(e.toUnit) === 'kg')
+    // is_assumed = 0 first; then the lowest id, so the choice is stable
+    // if the same (reference, from, to) appears twice.
+    .sort((a, b) => Number(a.isAssumed) - Number(b.isAssumed) || a.conversionId - b.conversionId)[0];
+  const edge = direct(specificEdges) || direct(globalEdges);
+  if (!edge) return null;
+  return {
+    kg: q * edge.factor,
+    conversionId: edge.conversionId,
+    isAssumed: edge.isAssumed,
+    path: [u, 'kg'],
+  };
 }
 
 function dateOnly(dbDateTime) {
@@ -144,7 +134,8 @@ async function assessPendingDiscards(db, teamId, { from, to, inventoryItemId } =
   const [conversionRows] = await db.query(
     `SELECT conversion_id, reference_id, from_unit, to_unit, factor, is_assumed
      FROM quantity_conversions
-     WHERE is_active = 1 AND (reference_id IS NULL${referenceIds.length > 0 ? ' OR reference_id IN (?)' : ''})`,
+     WHERE is_active = 1 AND LOWER(to_unit) = 'kg'
+       AND (reference_id IS NULL${referenceIds.length > 0 ? ' OR reference_id IN (?)' : ''})`,
     referenceIds.length > 0 ? [referenceIds] : []
   );
   const genericEdges = [];
@@ -170,7 +161,8 @@ async function assessPendingDiscards(db, teamId, { from, to, inventoryItemId } =
     const ref = references.get(String(row.product_id)) || null;
     const referenceId = ref ? ref.referenceId : null;
     const factor = referenceId ? pickFactor(factorsByRef.get(referenceId) || [], dateOnly(row.transaction_time)) : null;
-    const conversion = convertToKg(row.quantity, row.unit, [...(edgesByRef.get(referenceId) || []), ...genericEdges]);
+    // Rule: no reference_id -> no conversion (and no factor) -> EXCLUDED.
+    const conversion = referenceId ? convertToKg(row.quantity, row.unit, edgesByRef.get(referenceId) || [], genericEdges) : null;
 
     let status = 'ASSESSED';
     let reason = null;
@@ -184,7 +176,7 @@ async function assessPendingDiscards(db, teamId, { from, to, inventoryItemId } =
     const factorValue = factor ? Number(factor.factor_kg_co2e_per_kg) : null;
     const notes = [
       ref ? `reference ${referenceId} matched by ${ref.method}` : 'no reference match',
-      conversion ? `converted ${row.quantity} ${row.unit} -> ${conversion.kg.toFixed(6)} kg via ${conversion.path.join(' -> ')}${conversion.isAssumed ? ' (assumed)' : ''}` : `no conversion path from ${row.unit} to kg`,
+      conversion ? `converted ${row.quantity} ${row.unit} -> ${conversion.kg.toFixed(6)} kg (conversion ${conversion.conversionId}${conversion.isAssumed ? ', assumed value' : ''})` : (referenceId ? `no ${row.unit} -> kg conversion for reference ${referenceId}` : 'not converted (no reference)'),
       factor ? `factor ${factorValue} kg CO2e/kg (${factor.food_type || 'food type n/a'})` : null,
     ].filter(Boolean).join('; ');
 
