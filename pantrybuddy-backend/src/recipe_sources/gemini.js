@@ -125,10 +125,29 @@ async function suggestRecipes(items) {
     throw new ApiError(503, 'AI recipe ideas are busy right now (free-tier limit reached). Please try again later.');
   }
   if (!response.ok) {
-    // Logged server-side only — the body can contain details we don't
-    // want to show users.
-    console.error('Gemini error', response.status, await response.text().catch(() => ''));
-    throw new ApiError(502, 'The recipe service returned an error. Please try again.');
+    // Full body logged server-side only; the app gets a short, safe
+    // explanation so a setup problem is obvious without digging in logs.
+    const body = await response.text().catch(() => '');
+    console.error('Gemini error', response.status, body);
+    let message = '';
+    try {
+      message = String(JSON.parse(body)?.error?.message || '');
+    } catch {
+      message = '';
+    }
+    if (response.status === 400 && /api key/i.test(message)) {
+      throw new ApiError(503, 'AI recipe ideas aren\'t set up correctly: the Gemini API key was rejected.');
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new ApiError(503, 'AI recipe ideas aren\'t set up correctly: the API key isn\'t allowed to use Gemini.');
+    }
+    if (response.status === 404) {
+      throw new ApiError(503, `AI recipe ideas aren't set up correctly: the Gemini model "${model}" isn't available. Set GEMINI_MODEL to a current model.`);
+    }
+    if (response.status >= 500) {
+      throw new ApiError(502, 'Gemini is having problems right now. Please try again later.');
+    }
+    throw new ApiError(502, `The recipe service returned an error (${response.status}). Please try again.`);
   }
 
   const data = await response.json();
