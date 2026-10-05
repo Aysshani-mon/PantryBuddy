@@ -11,6 +11,7 @@ import '../models/environmental_impact.dart';
 import '../models/recipe.dart';
 import '../models/donation.dart';
 import '../models/insights_data.dart';
+import '../models/detected_item_draft.dart';
 
 /// See lib/data/README.md — screens depend only on these interfaces,
 /// never on a concrete storage implementation.
@@ -170,6 +171,9 @@ abstract class RecognitionRepository {
   Future<List<RecognitionCandidate>> recognizeText(String text);
   Future<BarcodeRecognitionResult> recognizeBarcode(String barcode);
   Future<List<RecognitionCandidate>> recognizeImage(List<int> imageBytes);
+  /// Epic 4 "Scan several items" — every food item Gemini finds in one
+  /// photo, as editable drafts for the review screen (nothing is saved).
+  Future<List<DetectedItemDraft>> recognizeMultipleItems(List<int> imageBytes);
   Future<OcrRecognitionResult> recognizeOcr(List<int> imageBytes);
   /// [rawText] — already OCR'd text (from BrowserOcrService), not an
   /// image — receipt OCR happens client-side, see chat for why.

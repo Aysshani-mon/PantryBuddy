@@ -18,6 +18,7 @@ import '../models/donation.dart';
 import '../models/insights_data.dart';
 import 'api_config.dart';
 import 'repository.dart';
+import '../models/detected_item_draft.dart';
 
 /// The backend's db.js uses `dateStrings: true`, so every DATETIME column
 /// comes back as a plain string like "2026-09-16 03:23:45" — no 'Z', no
@@ -773,6 +774,14 @@ class ApiDataStore
   Future<List<RecognitionCandidate>> recognizeImage(List<int> imageBytes) async {
     final json = await _post('/recognize/image', {'imageBase64': base64Encode(imageBytes)}) as Map<String, dynamic>;
     return _candidatesFromBackendJson(json['candidates']);
+  }
+
+  @override
+  Future<List<DetectedItemDraft>> recognizeMultipleItems(List<int> imageBytes) async {
+    final json = await _post('/recognize/multi', {'imageBase64': base64Encode(imageBytes)}) as Map<String, dynamic>;
+    return ((json['items'] as List?) ?? const [])
+        .map((e) => DetectedItemDraft.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   @override

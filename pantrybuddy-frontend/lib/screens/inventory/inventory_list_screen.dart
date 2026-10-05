@@ -9,6 +9,7 @@ import 'receipt_scan_screen.dart';
 import '../donations/donate_items_screen.dart';
 import '../donations/my_donations_screen.dart';
 import '../../theme/app_theme.dart';
+import 'multi_item_scan_screen.dart';
 
 /// AC 2.5.1 — items grouped under storage-location tabs (All/Fridge/
 /// Freezer/Pantry), each showing an item count.
@@ -103,6 +104,17 @@ class _InventoryListScreenState extends State<InventoryListScreen>
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Epic 4 — several items from one photo (Gemini), alongside the
+          // single-item photo scan on the Add screen and the receipt scan.
+          FloatingActionButton(
+            heroTag: 'scanMultipleFab',
+            tooltip: 'Scan several items',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => MultiItemScanScreen(appState: widget.appState),
+            )),
+            child: const Icon(Icons.shopping_basket_outlined),
+          ),
+          const SizedBox(height: 12),
           FloatingActionButton(
             heroTag: 'scanReceiptFab',
             tooltip: 'Scan receipt',
