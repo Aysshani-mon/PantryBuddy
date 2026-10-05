@@ -14,6 +14,7 @@ import '../models/recognition_candidate.dart';
 import '../models/receipt_item_draft.dart';
 import '../models/environmental_impact.dart';
 import '../models/recipe.dart';
+import '../models/donation.dart';
 import '../models/insights_data.dart';
 import 'api_config.dart';
 import 'repository.dart';
@@ -57,7 +58,8 @@ class ApiDataStore
         RecognitionRepository,
         ShelfLifeRepository,
         EnvironmentalImpactRepository,
-        RecipeRepository {
+        RecipeRepository,
+        DonationRepository {
   ApiDataStore({this.baseUrl = ApiConfig.baseUrl});
 
   final String baseUrl;
@@ -642,6 +644,94 @@ class ApiDataStore
       'ingredients': uses.map((u) => u.toJson()).toList(),
     });
     return RecipeUsageResult.fromJson(json as Map<String, dynamic>);
+  }
+
+  // ==================== DonationRepository ====================
+
+  @override
+  Future<List<DonationCentre>> getDonationCentres({
+    required String householdId,
+    double? latitude,
+    double? longitude,
+    String? query,
+    List<String> itemIds = const [],
+  }) async {
+    final params = Uri(queryParameters: {
+      if (latitude != null && longitude != null) 'lat': '$latitude',
+      if (latitude != null && longitude != null) 'lng': '$longitude',
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+      if (itemIds.isNotEmpty) 'itemIds': itemIds.join(','),
+    }).query;
+    final json = await _get('/households/$householdId/donation-centres${params.isEmpty ? '' : '?$params'}');
+    return ((json as Map<String, dynamic>)['centres'] as List)
+        .map((e) => DonationCentre.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<List<DonatableItem>> getDonatableItems({required String householdId, required DateTime today, String? excludeDonationId}) async {
+    final json = await _get('/households/$householdId/donation-items?today=${_dateOnly(DateTime(today.year, today.month, today.day))}'
+        '${excludeDonationId == null ? '' : '&excludeDonationId=$excludeDonationId'}');
+    return ((json as Map<String, dynamic>)['items'] as List)
+        .map((e) => DonatableItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<Donation> createDonation({
+    required String householdId,
+    required String centreId,
+    required List<DonationDraftItem> items,
+    required bool declarationAgreed,
+    required DateTime today,
+    String? notes,
+  }) async {
+    final json = await _post('/households/$householdId/donations', {
+      'centreId': centreId,
+      'items': items.map((i) => i.toJson()).toList(),
+      'declarationAgreed': declarationAgreed,
+      'today': _dateOnly(DateTime(today.year, today.month, today.day)),
+      if (notes != null) 'notes': notes,
+    });
+    return Donation.fromJson(json as Map<String, dynamic>);
+  }
+
+  @override
+  Future<List<Donation>> getMyDonations({required String householdId, String? status}) async {
+    final json = await _get('/households/$householdId/donations${status == null ? '' : '?status=$status'}');
+    return ((json as Map<String, dynamic>)['donations'] as List)
+        .map((e) => Donation.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<Donation> updateDonation({
+    required String donationId,
+    required List<DonationDraftItem> items,
+    required DateTime today,
+    String? notes,
+  }) async {
+    final json = await _put('/donations/$donationId', {
+      'items': items.map((i) => i.toJson()).toList(),
+      'today': _dateOnly(DateTime(today.year, today.month, today.day)),
+      'notes': notes ?? '',
+    });
+    return Donation.fromJson(json as Map<String, dynamic>);
+  }
+
+  @override
+  Future<void> cancelDonation(String donationId) async {
+    await _post('/donations/$donationId/cancel');
+  }
+
+  @override
+  Future<Donation> completeDonation({required String donationId, required Map<String, double> deliveredByItemId}) async {
+    final json = await _post('/donations/$donationId/complete', {
+      'items': deliveredByItemId.entries
+          .map((e) => {'donationItemId': e.key, 'deliveredQuantity': e.value})
+          .toList(),
+    });
+    return Donation.fromJson(json as Map<String, dynamic>);
   }
 
   // ==================== RecognitionRepository ====================
