@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../state/app_state.dart';
 import '../../models/reminder.dart';
-import '../../theme/app_theme.dart';
 import '../inventory/item_detail_screen.dart';
 import '../../models/food_item.dart';
 
