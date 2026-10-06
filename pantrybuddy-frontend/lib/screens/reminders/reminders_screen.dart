@@ -1,8 +1,11 @@
+// ignore_for_file: prefer_const_constructors
+
 import 'package:flutter/material.dart';
 import '../../state/app_state.dart';
 import '../../models/reminder.dart';
 import '../inventory/item_detail_screen.dart';
 import '../../models/food_item.dart';
+import '../../theme/app_theme.dart';
 
 /// AC 3.3.1 — all upcoming reminders in one place, sorted by urgency.
 class RemindersScreen extends StatelessWidget {
@@ -86,29 +89,23 @@ class _ReminderTile extends StatelessWidget {
     // 3. If item is less than 3 days from expiry date, the color is red.
     // 4. If item is expired, the color is grey.
     final daysLeft = item.daysLeft;
-    final Color cardColor;
-    final Color textColor;
+    final Color borderColor;
 
     if (daysLeft < 0) {
-      cardColor = const Color(0xFFE0E0E0);
-      textColor = Colors.black;
+      borderColor = const Color(0xFFE0E0E0);
     } else if (daysLeft < 3) {
-      cardColor = const Color(0xFFD50000);
-      textColor = Colors.white;
+      borderColor = const Color(0xFFD50000);
     } else if (daysLeft < 7) {
-      cardColor = const Color(0xFFFFEB3B);
-      textColor = Colors.black;
+      borderColor = const Color(0xFFFFEB3B);
     } else {
-      cardColor = const Color(0xFF69F0AE);
-      textColor = Colors.black;
+      borderColor = const Color(0xFF69F0AE);
     }
 
     final String expiryLabel;
 
     if (daysLeft < 0) {
-  final overdueDays = -daysLeft;
-  expiryLabel =
-      'Expired $overdueDays day${overdueDays == 1 ? '' : 's'} ago';
+      final overdueDays = -daysLeft;
+      expiryLabel = 'Expired $overdueDays day${overdueDays == 1 ? '' : 's'} ago';
     } else if (daysLeft == 0) {
       expiryLabel = 'Expires today';
     } else {
@@ -116,10 +113,11 @@ class _ReminderTile extends StatelessWidget {
     }
 
     return Card(
-      color: cardColor,
+      color: const Color.fromARGB(255, 207, 231, 207),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: borderColor, width: 4),
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -136,19 +134,18 @@ class _ReminderTile extends StatelessWidget {
           ),
         ),
         leading: CircleAvatar(
-          backgroundColor: textColor.withValues(alpha: 0.12),
+          backgroundColor: const Color(0xFFF8FAF8),
           child: Icon(
             daysLeft < 0
-                ? Icons.event_busy_outlined
+                ? Icons.delete_outlined
                 : Icons.notifications_active_outlined,
-            color: textColor,
             size: 20,
           ),
         ),
         title: Text(
           item.name,
           style: TextStyle(
-            color: textColor,
+            color: Colors.black87,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -193,13 +190,16 @@ class _ReminderTile extends StatelessWidget {
             Text(
               'Reminds ${reminder.leadTimeDays} '
               'day${reminder.leadTimeDays == 1 ? '' : 's'} before',
-              style: TextStyle(color: textColor),
+              style: TextStyle(
+                color: Colors.black87, 
+                fontSize: 12
+                ),
             ),
             const SizedBox(height: 4),
             Text(
               expiryLabel,
               style: TextStyle(
-                color: textColor,
+                color: Colors.black87,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -207,7 +207,9 @@ class _ReminderTile extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 'Open item to record disposal',
-                style: TextStyle(color: textColor),
+                style: TextStyle(
+                  color: Colors.black87, 
+                  fontStyle: FontStyle.italic),
               ),
             ],
           ],
@@ -215,7 +217,7 @@ class _ReminderTile extends StatelessWidget {
         trailing: reminder.triggered
             ? Icon(
                 Icons.notifications,
-                color: textColor,
+                color: Colors.black87,
                 size: 20,
               )
             : null,
