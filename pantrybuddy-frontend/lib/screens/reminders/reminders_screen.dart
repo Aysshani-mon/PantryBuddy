@@ -7,7 +7,9 @@ import '../inventory/item_detail_screen.dart';
 import '../../models/food_item.dart';
 import '../../theme/app_theme.dart';
 
-/// AC 3.3.1 — all upcoming reminders in one place, sorted by urgency.
+/// Reminders that are DUE, most urgent first. A reminder only appears here
+/// once its date arrives (expiry date minus its lead time); before that it
+/// stays hidden, and the empty state says how many are scheduled.
 class RemindersScreen extends StatelessWidget {
   const RemindersScreen({super.key, required this.appState});
   final AppState appState;
@@ -21,18 +23,24 @@ class RemindersScreen extends StatelessWidget {
         builder: (context, _) {
           // Only show one reminder per item, even if multiple reminders exist for that item.
           final seenItemIds = <String>{};
-          final reminders = appState.sortedUpcomingReminders.where((reminder) {
+          final reminders = appState.dueReminders.where((reminder) {
             final itemKey = '${reminder.householdId}:${reminder.itemId}';
             return seenItemIds.add(itemKey);
           }).toList();
           // Yola
 
           if (reminders.isEmpty) {
+            // Count scheduled (not yet due) reminders, one per item, so the
+            // empty screen doesn't suggest that no reminders exist at all.
+            final scheduledItems = appState.sortedUpcomingReminders.map((r) => r.itemId).toSet().length;
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
                 child: Text(
-                  'No reminders set yet. Add one from any item\'s page.',
+                  scheduledItems == 0
+                      ? 'No reminders set yet. Add one from any item\'s page.'
+                      : 'Nothing due right now.\n$scheduledItems ${scheduledItems == 1 ? 'reminder is' : 'reminders are'} '
+                          'scheduled and will appear here when ${scheduledItems == 1 ? 'it\'s' : 'they\'re'} due.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey.shade600),
                 ),

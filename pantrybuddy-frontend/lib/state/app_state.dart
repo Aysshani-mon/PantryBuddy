@@ -601,6 +601,11 @@ class AppState extends ChangeNotifier {
     return list;
   }
 
+  List<Reminder> get dueReminders => sortedUpcomingReminders.where((r) {
+        final item = items.firstWhere((i) => i.id == r.itemId);
+        return ReminderService.isDue(item: item, leadTimeDays: r.leadTimeDays);
+      }).toList();
+
   // ==================== Shelf-life suggestions ====================
 
   /// See [ShelfLifeRepository.getSuggestion] — exposed here so screens
