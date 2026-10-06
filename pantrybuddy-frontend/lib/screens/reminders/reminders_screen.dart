@@ -113,10 +113,14 @@ class _ReminderTile extends StatelessWidget {
     }
 
     return Card(
-      color: const Color.fromARGB(255, 227, 242, 227),
+      color: const Color(0xFFF5F5F5),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
+        side:BorderSide(
+          color: Color(0xff00000000),
+          width: 1,
+          )
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
