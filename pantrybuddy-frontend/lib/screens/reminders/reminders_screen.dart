@@ -5,7 +5,7 @@ import '../../state/app_state.dart';
 import '../../models/reminder.dart';
 import '../inventory/item_detail_screen.dart';
 import '../../models/food_item.dart';
-import '../../theme/app_theme.dart';
+// import '../../theme/app_theme.dart';
 
 /// Reminders that are DUE, most urgent first. A reminder only appears here
 /// once its date arrives (expiry date minus its lead time); before that it

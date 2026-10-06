@@ -601,10 +601,11 @@ class AppState extends ChangeNotifier {
     return list;
   }
 
-  List<Reminder> get dueReminders => sortedUpcomingReminders.where((r) {
+    List<Reminder> get dueReminders => sortedUpcomingReminders.where((r) {
         final item = items.firstWhere((i) => i.id == r.itemId);
         return ReminderService.isDue(item: item, leadTimeDays: r.leadTimeDays);
       }).toList();
+
 
   // ==================== Shelf-life suggestions ====================
 
@@ -637,6 +638,13 @@ class AppState extends ChangeNotifier {
       range: range,
       trendStarts: trendStarts,
     );
+  }
+
+  /// Epic 8 — the actual weight of a discard whose unit couldn't be converted.
+  Future<void> setDiscardedWeight({required String inventoryItemId, required double weightKg}) {
+    if (currentHousehold == null) throw AuthException('You need to be in a household to do this.');
+    return environmentalImpactRepo.setDiscardedWeight(
+        householdId: currentHousehold!.id, inventoryItemId: inventoryItemId, weightKg: weightKg);
   }
 
   // ==================== Recipes (Epic 6) ====================
