@@ -89,16 +89,16 @@ class _ReminderTile extends StatelessWidget {
     // 3. If item is less than 3 days from expiry date, the color is red.
     // 4. If item is expired, the color is grey.
     final daysLeft = item.daysLeft;
-    final Color borderColor;
+    final Color bellColor;
 
     if (daysLeft < 0) {
-      borderColor = const Color(0xFFE0E0E0);
+      bellColor = const Color(0xFFE0E0E0);
     } else if (daysLeft < 3) {
-      borderColor = const Color(0xFFD50000);
+      bellColor = const Color(0xFFD50000);
     } else if (daysLeft < 7) {
-      borderColor = const Color(0xFFFFEB3B);
+      bellColor = const Color(0xFFFFEB3B);
     } else {
-      borderColor = const Color(0xFF69F0AE);
+      bellColor = const Color(0xFF69F0AE);
     }
 
     final String expiryLabel;
@@ -113,11 +113,10 @@ class _ReminderTile extends StatelessWidget {
     }
 
     return Card(
-      color: const Color.fromARGB(255, 207, 231, 207),
+      color: const Color.fromARGB(255, 227, 242, 227),
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: borderColor, width: 4),
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -134,7 +133,7 @@ class _ReminderTile extends StatelessWidget {
           ),
         ),
         leading: CircleAvatar(
-          backgroundColor: const Color(0xFFF8FAF8),
+          backgroundColor: bellColor,
           child: Icon(
             daysLeft < 0
                 ? Icons.delete_outlined
