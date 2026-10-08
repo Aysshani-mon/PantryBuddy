@@ -21,6 +21,8 @@ dependencies:
   image_picker: ^1.1.2
   # Epic 7 — "Use my location" for nearby donation centres (works on web too).
   geolocator: ^13.0.1
+  # Epic 7 — open a donation centre in Google Maps (app on phones, new tab on web).
+  url_launcher: ^6.3.0
   # Persists the session token/userId across app restarts (User Story:
   # "stay logged in") — uses browser localStorage on web.
   shared_preferences: ^2.3.2

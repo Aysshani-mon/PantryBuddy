@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/donation.dart';
 import '../../theme/app_theme.dart';
@@ -85,6 +86,35 @@ class StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: fg)),
+    );
+  }
+}
+
+/// Opens a place in Google Maps using Google's official Maps URLs (no API
+/// key needed): the Google Maps app on phones, a new tab on the web.
+/// Coordinates are used when we have them (exact pin); otherwise the
+/// name and address are searched. [directions] opens a route instead.
+Future<void> openInGoogleMaps(
+  BuildContext context, {
+  required String name,
+  required String address,
+  double? latitude,
+  double? longitude,
+  bool directions = false,
+}) async {
+  final place = latitude != null && longitude != null ? '$latitude,$longitude' : '$name, $address';
+  final uri = directions
+      ? Uri.https('www.google.com', '/maps/dir/', {'api': '1', 'destination': place})
+      : Uri.https('www.google.com', '/maps/search/', {'api': '1', 'query': place});
+  var opened = false;
+  try {
+    opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+  } catch (_) {
+    opened = false;
+  }
+  if (!opened && context.mounted) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Couldn\'t open Google Maps on this device.')),
     );
   }
 }
