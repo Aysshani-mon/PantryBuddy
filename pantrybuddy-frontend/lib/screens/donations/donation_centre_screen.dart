@@ -49,11 +49,50 @@ class DonationCentreScreen extends StatelessWidget {
             Text(centre.description!),
           ],
           const SizedBox(height: 14),
-          _infoRow(Icons.place_outlined, centre.fullAddress),
+          // Tap the address to open the centre in Google Maps.
+          InkWell(
+            onTap: () => _openMaps(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.place_outlined, size: 18, color: AppTheme.ocean),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(centre.fullAddress,
+                        style: const TextStyle(fontSize: 13.5, color: AppTheme.ocean, decoration: TextDecoration.underline)),
+                  ),
+                  const Icon(Icons.open_in_new, size: 16, color: AppTheme.ocean),
+                ],
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openMaps(context),
+                  icon: const Icon(Icons.map_outlined, size: 18),
+                  label: const Text('View on map'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _openMaps(context, directions: true),
+                  icon: const Icon(Icons.directions_outlined, size: 18),
+                  label: const Text('Directions'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           if (centre.operatingHours != null) _infoRow(Icons.schedule, centre.operatingHours!),
           for (final (label, value) in contact) _infoRow(label == 'Phone' ? Icons.phone_outlined : label == 'Email' ? Icons.email_outlined : Icons.language, value),
-          const SizedBox(height: 14),
-          RequirementsBox(centre: centre),
+          // The centre's written requirements are shown (and confirmed) on
+          // the review page, so they aren't repeated here.
           const SizedBox(height: 16),
           const Text('Foods they accept', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
           const SizedBox(height: 6),
@@ -107,6 +146,15 @@ class DonationCentreScreen extends StatelessWidget {
       ),
     );
   }
+
+  void _openMaps(BuildContext context, {bool directions = false}) => openInGoogleMaps(
+        context,
+        name: centre.name,
+        address: centre.fullAddress,
+        latitude: centre.latitude,
+        longitude: centre.longitude,
+        directions: directions,
+      );
 
   Widget _infoRow(IconData icon, String text) => Padding(
         padding: const EdgeInsets.only(bottom: 8),

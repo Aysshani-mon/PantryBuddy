@@ -315,7 +315,19 @@ class _DonationDetailScreenState extends State<DonationDetailScreen> {
             ),
             if (d.centreAddress != null && d.centreAddress!.isNotEmpty) ...[
               const SizedBox(height: 4),
-              Text(d.centreAddress!, style: TextStyle(color: Colors.grey.shade700)),
+              // Tap to open in Google Maps (by name + address).
+              InkWell(
+                onTap: () => openInGoogleMaps(context, name: d.centreName, address: d.centreAddress!),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(d.centreAddress!,
+                          style: const TextStyle(color: AppTheme.ocean, decoration: TextDecoration.underline)),
+                    ),
+                    const Icon(Icons.open_in_new, size: 16, color: AppTheme.ocean),
+                  ],
+                ),
+              ),
             ],
             if (d.centreHours != null) Text(d.centreHours!, style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
             if (d.centrePhone != null) SelectableText('Phone: ${d.centrePhone}', style: const TextStyle(fontSize: 12.5)),
