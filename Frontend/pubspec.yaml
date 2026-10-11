@@ -1,0 +1,62 @@
+name: pantrybuddy
+description: "PantryBuddy — Smart Household Food Inventory & Expiry Management Platform"
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  # HTTP client for talking to the real backend API (see lib/data/api_data_store.dart)
+  # and for Open Food Facts barcode lookups (see lib/services/product_lookup_service.dart).
+  http: ^1.2.2
+  # Barcode scanning (User Story 4.1) — CameraX/ML Kit on Android, AVFoundation/
+  # Apple Vision on iOS & macOS, ZXing on web. Works on the deployed web build.
+  mobile_scanner: ^7.2.0
+  # Photo capture for image recognition (User Story 4.3) — camera/gallery
+  # picker with built-in resize/compression so uploads stay small.
+  image_picker: ^1.1.2
+  # Epic 7 — "Use my location" for nearby donation centres (works on web too).
+  geolocator: ^13.0.1
+  # Epic 7 — open a donation centre in Google Maps (app on phones, new tab on web).
+  url_launcher: ^6.3.0
+  # Persists the session token/userId across app restarts (User Story:
+  # "stay logged in") — uses browser localStorage on web.
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+  - assets/images/Logo.png
+  - assets/images/logo_wordmark.png
+  - assets/images/mascot.png
+
+  # Brand fonts (SIL Open Font License — see assets/fonts/*-OFL.txt).
+  # Fraunces = headings, Figtree = everything else.
+  fonts:
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Fraunces-Bold.ttf
+          weight: 700
+    - family: Figtree
+      fonts:
+        - asset: assets/fonts/Figtree-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Figtree-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Figtree-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Figtree-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Figtree-ExtraBold.ttf
+          weight: 800

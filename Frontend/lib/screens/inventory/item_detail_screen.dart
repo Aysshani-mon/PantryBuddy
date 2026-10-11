@@ -1,0 +1,332 @@
+import 'package:flutter/material.dart';
+import '../../state/app_state.dart';
+import '../../models/food_item.dart';
+import '../../theme/app_theme.dart';
+import '../../utils/date_format.dart';
+import 'add_edit_item_screen.dart';
+import 'record_discard_screen.dart';
+import '../donations/donate_items_screen.dart';
+
+/// AC 2.6.1 plus item actions: consume / discard / donate, edit.
+/// The standalone "Delete" action was removed (usability testing found
+/// no real use for it once every item must be explicitly resolved via
+/// one of these three actions instead).
+///
+/// Wrapped in a ListenableBuilder and always re-reads the current item
+/// from AppState.items by id, rather than displaying the fixed snapshot
+/// passed in at navigation time — otherwise editing an item and coming
+/// back here showed stale details until you left and reopened the screen.
+class ItemDetailScreen extends StatelessWidget {
+  const ItemDetailScreen({super.key, required this.appState, required this.item});
+  final AppState appState;
+  final FoodItem item;
+
+  Future<void> _resolve(
+    BuildContext context,
+    FoodItem item,
+    ItemDisposition disposition, {
+    DiscardReason? discardReason,
+    ConsumedAmount? consumedAmount,
+    double? remainingQuantity,
+  }) async {
+    // Show immediate visual feedback the moment the action is confirmed
+    // — previously the button just sat there with no response while the
+    // network request was in flight, then the screen suddenly popped,
+    // which read as "nothing happened" from the user's side.
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      await appState.resolveItem(
+        item,
+        disposition,
+        discardReason: discardReason,
+        consumedAmount: consumedAmount,
+        remainingQuantity: remainingQuantity,
+      );
+      if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss the loading indicator
+        Navigator.of(context).pop(); // then leave the item detail screen
+      }
+    } catch (e) {
+      if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss the loading indicator
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Couldn\'t update this item: $e')));
+      }
+    }
+  }
+
+  Future<void> _consume(BuildContext context, FoodItem item) async {
+    final amount = await showModalBottomSheet<ConsumedAmount>(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(18))),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('How much did you consume?', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text('This helps track how food actually gets used.', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+              const SizedBox(height: 14),
+              ...ConsumedAmount.values.map((a) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.restaurant_outlined),
+                    title: Text(a.label, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    onTap: () => Navigator.of(context).pop(a),
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (amount == null || !context.mounted) return;
+
+    // "Half" is unambiguous maths (handled entirely in AppState). "Full"
+    // needs no quantity input either — the item just fully resolves.
+    // "Partial" has no single correct fraction, so we ask directly
+    // rather than guess.
+    double? remainingQuantity;
+    if (amount == ConsumedAmount.partial) {
+      remainingQuantity = await _promptRemainingQuantity(context, item);
+      if (remainingQuantity == null || !context.mounted) return; // user cancelled
+    }
+
+    await _resolve(context, item, ItemDisposition.consumed, consumedAmount: amount, remainingQuantity: remainingQuantity);
+  }
+
+  /// Asks "how much is left?" rather than "how much did you use?" —
+  /// people generally know what's left in the fridge more reliably than
+  /// they can estimate what fraction they just used.
+  Future<double?> _promptRemainingQuantity(BuildContext context, FoodItem item) async {
+    final controller = TextEditingController(text: _formatQty(item.quantity));
+    return showDialog<double>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('How much is left?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Currently ${_formatQty(item.quantity)} ${item.unit}. Enter how much is left after this use.',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: InputDecoration(labelText: 'Remaining (${item.unit})', isDense: true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text.trim());
+              if (value == null || value < 0 || value >= item.quantity) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  SnackBar(content: Text('Enter a number less than ${_formatQty(item.quantity)} ${item.unit}.')),
+                );
+                return;
+              }
+              Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatQty(double q) => q == q.roundToDouble() ? q.toInt().toString() : q.toString();
+
+  Future<void> _discard(BuildContext context, FoodItem item) async {
+    final reason = await Navigator.of(context).push<DiscardReason>(
+      MaterialPageRoute(builder: (_) => RecordDiscardScreen(item: item)),
+    );
+    if (reason != null && context.mounted) {
+      await _resolve(context, item, ItemDisposition.discarded, discardReason: reason);
+    }
+  }
+
+  /// Epic 7 — opens the donation flow with this item already ticked.
+  /// (This used to mark the item donated straight away; stock now only
+  /// changes when a donation is completed, per the data team's rules.)
+  Future<void> _donate(BuildContext context, FoodItem item) async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => DonateItemsScreen(appState: appState, preselectedItemId: item.id),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: appState,
+      builder: (context, _) {
+        // Always the current version — falls back to the originally
+        // passed-in item only if it's ever been removed from the list.
+        final liveItem = appState.items.where((i) => i.id == item.id).isEmpty
+            ? item
+            : appState.items.firstWhere((i) => i.id == item.id);
+        return _buildScaffold(context, liveItem);
+      },
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, FoodItem item) {
+    final color = urgencyColor(item.daysLeft);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(item.name),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => AddEditItemScreen(appState: appState, existingItem: item),
+            )),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _row('Quantity', '${item.quantity} ${item.unit}'),
+                    _row('Storage location', item.storageLocation.label),
+                    _row('Category', item.category.label),
+                    _row('Use-by date', formatLongDate(item.useByDate)),
+                    _row(
+                      'Status',
+                      item.daysLeft < 0 ? '${-item.daysLeft} days overdue' : '${item.daysLeft} days left',
+                      valueColor: color,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (item.notes != null && item.notes!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Note', style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+                      const SizedBox(height: 6),
+                      Text(item.notes!, style: const TextStyle(fontSize: 14.5)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 24),
+            if (item.isActive) ...[
+              if (item.consumedAmount != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppTheme.honeyLight,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE8CC8F)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.restaurant_outlined, color: AppTheme.honey, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '${item.consumedAmount!.label} \u2014 ${_formatQty(item.quantity)} ${item.unit} left',
+                          style: const TextStyle(color: Color(0xFF7A4E10), fontWeight: FontWeight.w600, fontSize: 13.5),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+              const Text('What happened to this item?',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _consume(context, item),
+                  icon: const Icon(Icons.restaurant_outlined),
+                  label: const Text('Consume', style: TextStyle(fontSize: 15.5)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _discard(context, item),
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                  label: const Text('Discard', style: TextStyle(fontSize: 15.5)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.paprika,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _donate(context, item),
+                  icon: const Icon(Icons.volunteer_activism_outlined),
+                  label: const Text('Donate', style: TextStyle(fontSize: 15.5)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.ocean,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ] else ...[
+              Chip(label: Text('Marked as ${item.disposition!.name}')),
+              if (item.discardReason != null) ...[
+                const SizedBox(height: 8),
+                Text('Reason: ${item.discardReason!.label}', style: TextStyle(color: Colors.grey.shade700)),
+              ],
+              if (item.consumedAmount != null) ...[
+                const SizedBox(height: 8),
+                Text(item.consumedAmount!.label, style: TextStyle(color: Colors.grey.shade700)),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey.shade600)),
+          Text(value,
+              style: TextStyle(fontWeight: FontWeight.w600, color: valueColor)),
+        ],
+      ),
+    );
+  }
+}
