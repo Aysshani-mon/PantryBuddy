@@ -8,8 +8,22 @@ import 'food_item.dart';
 const List<String> kDonationConditions = [
   'Sealed / unopened',
   'Opened, in good condition',
-  'Fresh, in good condition',
 ];
+
+/// Team rule: only packaged food can be donated. Items in these categories
+/// are fresh food and are blocked. Must match FRESH_FOOD_CATEGORIES in the
+/// backend (routes/donations.js).
+const Set<ProductCategory> kFreshFoodCategories = {
+  ProductCategory.fruits,
+  ProductCategory.vegetables,
+  ProductCategory.meat,
+  ProductCategory.seafood,
+  ProductCategory.eggs,
+  ProductCategory.vegetarianProteins,
+  ProductCategory.deliPreparedFoods,
+};
+
+bool isFreshFoodCategory(ProductCategory c) => kFreshFoodCategories.contains(c);
 
 /// How a centre's accepted-food list covers one of the user's items.
 enum DonationCheckResult {
@@ -167,6 +181,7 @@ class DonatableItem {
     required this.reservedQuantity,
     required this.availableToDonate,
     required this.isExpired,
+    required this.isFreshFood,
     this.expiryDate,
   });
 
@@ -180,8 +195,10 @@ class DonatableItem {
   final double reservedQuantity;
   final double availableToDonate;
   final bool isExpired;
+  /// Fresh (unpackaged) food — can't be donated.
+  final bool isFreshFood;
 
-  bool get canDonate => !isExpired && availableToDonate > 0;
+  bool get canDonate => !isExpired && !isFreshFood && availableToDonate > 0;
 
   factory DonatableItem.fromJson(Map<String, dynamic> json) => DonatableItem(
         id: json['id'] as String,
@@ -193,6 +210,7 @@ class DonatableItem {
         reservedQuantity: (json['reservedQuantity'] as num).toDouble(),
         availableToDonate: (json['availableToDonate'] as num).toDouble(),
         isExpired: json['isExpired'] as bool? ?? false,
+        isFreshFood: json['isFreshFood'] as bool? ?? isFreshFoodCategory(_categoryFrom(json['category'])),
       );
 }
 

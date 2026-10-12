@@ -6,6 +6,7 @@ import '../../utils/date_format.dart';
 import 'add_edit_item_screen.dart';
 import 'record_discard_screen.dart';
 import '../donations/donate_items_screen.dart';
+import '../../models/donation.dart' show isFreshFoodCategory;
 
 /// AC 2.6.1 plus item actions: consume / discard / donate, edit.
 /// The standalone "Delete" action was removed (usability testing found
@@ -290,7 +291,8 @@ class ItemDetailScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
-                  onPressed: () => _donate(context, item),
+                  // Team rule: only packaged food can be donated.
+                  onPressed: isFreshFoodCategory(item.category) ? null : () => _donate(context, item),
                   icon: const Icon(Icons.volunteer_activism_outlined),
                   label: const Text('Donate', style: TextStyle(fontSize: 15.5)),
                   style: ElevatedButton.styleFrom(
@@ -299,6 +301,12 @@ class ItemDetailScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (isFreshFoodCategory(item.category)) ...[
+                const SizedBox(height: 6),
+                Text('Fresh food can\'t be donated. Only packaged food can.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700)),
+              ],
             ] else ...[
               Chip(label: Text('Marked as ${item.disposition!.name}')),
               if (item.discardReason != null) ...[

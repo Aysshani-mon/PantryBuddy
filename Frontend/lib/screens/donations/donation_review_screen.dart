@@ -50,7 +50,10 @@ class _DonationReviewScreenState extends State<DonationReviewScreen> {
     super.initState();
     final existing = {for (final i in widget.editing?.items ?? const <DonationItem>[]) i.inventoryItemId: i};
     _rows = widget.items
-        .map((item) => _Row(item, quantity: existing[item.id]?.quantity, condition: existing[item.id]?.condition))
+        .map((item) => _Row(item,
+            quantity: existing[item.id]?.quantity,
+            // A condition that's no longer offered (e.g. the old "Fresh" one) must be chosen again.
+            condition: kDonationConditions.contains(existing[item.id]?.condition) ? existing[item.id]?.condition : null))
         .toList();
     _declaration = _isEdit; // already confirmed when it was created
   }

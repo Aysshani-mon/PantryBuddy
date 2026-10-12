@@ -89,10 +89,12 @@ class _DonateItemsScreenState extends State<DonateItemsScreen> {
                             padding: const EdgeInsets.only(bottom: 8),
                             child: Text('Donating to ${widget.centre!.name}', style: const TextStyle(fontWeight: FontWeight.w700)),
                           ),
-                        Text('Tick everything you\'d like to donate. You\'ll set amounts and condition on the next steps.',
+                        Text('Tick everything you\'d like to donate. Only packaged food can be donated. You\'ll set amounts and condition on the next steps.',
                             style: TextStyle(color: Colors.grey.shade700, fontSize: 13)),
                         const SizedBox(height: 8),
-                        for (final item in items) _buildRow(item),
+                        // Items that can be donated first; blocked ones (expired, fresh) after.
+                        for (final item in [...items.where((i) => i.canDonate), ...items.where((i) => !i.canDonate)])
+                          _buildRow(item),
                       ],
                     ),
       bottomNavigationBar: SafeArea(
@@ -115,9 +117,11 @@ class _DonateItemsScreenState extends State<DonateItemsScreen> {
   Widget _buildRow(DonatableItem item) {
     final String? blocked = item.isExpired
         ? 'Expired — can\'t be donated'
-        : item.availableToDonate <= 0
-            ? 'All of it is already in a pending donation'
-            : null;
+        : item.isFreshFood
+            ? 'Fresh food — only packaged food can be donated'
+            : item.availableToDonate <= 0
+                ? 'All of it is already in a pending donation'
+                : null;
     final details = [
       '${formatQty(item.availableToDonate)} ${item.unit} available',
       if (item.reservedQuantity > 0) '${formatQty(item.reservedQuantity)} ${item.unit} already in a pending donation',

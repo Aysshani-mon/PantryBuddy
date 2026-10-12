@@ -24,12 +24,19 @@ const router = express.Router();
 //     shown as written and confirmed by the user (declaration_agreed),
 //     never interpreted by code.
 // Our own checks (block regardless of centre): expired food can't be
-// donated, and an item can't be promised beyond what's in stock across
-// all of the household's pending donations.
+// donated, fresh (unpackaged) food can't be donated, and an item can't be
+// promised beyond what's in stock across all of the household's pending
+// donations.
 
 const FULLY_USED_THRESHOLD = 0.01; // same "effectively finished" rule as the rest of the app
 const EARTH_RADIUS_KM = 6371;
-const CONDITIONS = ['Sealed / unopened', 'Opened, in good condition', 'Fresh, in good condition'];
+// Team decision: only packaged food can be donated. These categories are
+// fresh food and are blocked. Must match kFreshFoodCategories in Flutter
+// (lib/models/donation.dart).
+const FRESH_FOOD_CATEGORIES = new Set([
+  'Fruits', 'Vegetables', 'Meat', 'Seafood', 'Eggs', 'Vegetarian Proteins', 'Deli & Prepared Foods',
+]);
+const CONDITIONS = ['Sealed / unopened', 'Opened, in good condition'];
 const ORG_TYPES = {
   CARE_HOME: 'careHome', NGO: 'ngo', FOOD_BANK: 'foodBank', COMMUNITY_CENTRE: 'communityCentre',
   RELIGIOUS_ORG: 'religiousOrg', PANTRY_DROP_OFF: 'pantryDropOff', COMMUNITY_FRIDGE: 'communityFridge', OTHER: 'other',
@@ -103,6 +110,7 @@ async function loadItems(db, householdId, ids, { excludeDonationId = null, lock 
       name: r.product_name,
       categoryId: Number(r.category_id),
       category: CATEGORY_DART_NAMES[r.category_name] ?? 'shelfStableFoods',
+      isFreshFood: FRESH_FOOD_CATEGORIES.has(r.category_name),
       quantity,
       unit: r.unit || 'pcs',
       status: r.status,
@@ -235,8 +243,9 @@ router.get('/households/:householdId/donation-centres', asyncHandler(async (req,
 }));
 
 // GET /households/:householdId/donation-items?today=YYYY-MM-DD&excludeDonationId=
-// Items that can be donated: in stock, not expired, something left after
-// other pending donations. Used by the "Donate food" item picker.
+// The household's in-stock items for the donation picker. Expired and fresh
+// items are returned flagged (isExpired / isFreshFood) so the picker can
+// show why they can't be chosen. Used by the "Donate food" item picker.
 // excludeDonationId: when editing that donation, its own amounts don't
 // count as "already promised".
 router.get('/households/:householdId/donation-items', asyncHandler(async (req, res) => {
@@ -276,6 +285,8 @@ async function validateDonationItems(conn, householdId, rawItems, today, exclude
     if (!item || item.status !== 'IN_STOCK') throw new ApiError(409, 'One of the items is no longer in your inventory. Refresh and try again.');
     // Our own rule — never donate expired food.
     if (item.expiryDate && item.expiryDate < today) throw new ApiError(400, `${item.name} has expired and can't be donated.`);
+    // Team rule — only packaged food can be donated.
+    if (item.isFreshFood) throw new ApiError(400, `${item.name} is fresh food. Only packaged food can be donated.`);
     // AC 7.2.4
     if (!Number.isFinite(w.quantity) || w.quantity <= 0) throw new ApiError(400, `Enter a quantity above 0 for ${item.name}.`);
     if (w.quantity > item.availableToDonate + 1e-9) {
