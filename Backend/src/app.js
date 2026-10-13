@@ -15,8 +15,15 @@ const recipesRouter = require('./routes/recipes');
 const donationsRouter = require('./routes/donations');
 const { ApiError } = require('./util/errors');
 const { requireAuth } = require('./util/auth');
+const {
+  signInLimiter, signUpLimiter, forgotPasswordLimiter, resetPasswordLimiter, aiLimiter,
+} = require('./util/rate_limits');
 
 const app = express();
+// On Vercel, requests arrive through one proxy that sets X-Forwarded-For;
+// trusting that one hop makes req.ip the user's real address (needed for
+// the rate limits below). Not set locally, where there is no proxy.
+if (process.env.VERCEL) app.set('trust proxy', 1);
 app.use(cors());
 // Default express.json() limit is 100kb — far too small for a base64-
 // encoded photo upload (a compressed ~150KB JPEG becomes ~200KB as
@@ -28,6 +35,11 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/health', (req, res) => res.json({ ok: true }));
 
 // Public — no token needed to sign up, sign in, or request a password reset.
+// Limits on the public routes most open to abuse (see util/rate_limits.js).
+app.use('/auth/signin', signInLimiter);
+app.use('/auth/signup', signUpLimiter);
+app.use('/auth/forgot-password', forgotPasswordLimiter);
+app.use('/auth/reset-password', resetPasswordLimiter);
 app.use('/auth', authRouter);
 
 // Everything below this line requires a valid Bearer token (see
@@ -35,6 +47,11 @@ app.use('/auth', authRouter);
 // and individual routes further check household membership/admin role
 // where relevant (see util/household_access.js).
 app.use(requireAuth);
+
+// AI and photo recognition use limited Google quotas — cap them per user.
+app.use('/households/:householdId/recipe-suggestions/ai', aiLimiter);
+app.use('/recognize/image', aiLimiter);
+app.use('/recognize/multi', aiLimiter);
 
 app.use('/users', usersRouter);
 // These routers define their own full paths internally (mixing

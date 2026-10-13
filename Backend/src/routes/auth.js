@@ -7,6 +7,7 @@ const { signToken, signResetToken, verifyResetToken } = require('../util/auth');
 const { sendPasswordResetEmail } = require('../util/email');
 
 const router = express.Router();
+const MIN_PASSWORD_LENGTH = 8;
 
 function userRowToJson(row) {
   return {
@@ -22,6 +23,11 @@ router.post('/signup', asyncHandler(async (req, res) => {
   const { name, email, password, avatarKey } = req.body;
   if (!name || !email || !password) {
     throw new ApiError(400, 'name, email and password are required.');
+  }
+  // Same rule as the app's sign-up form and reset-password, enforced here
+  // too so a direct API call can't create a weaker password.
+  if (String(password).length < MIN_PASSWORD_LENGTH) {
+    throw new ApiError(400, `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
   }
   const normalizedEmail = String(email).trim().toLowerCase();
 
@@ -73,7 +79,13 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
   const [rows] = await pool.query('SELECT user_id, password_hash FROM users WHERE email = ?', [normalizedEmail]);
   if (rows.length > 0) {
     const resetToken = signResetToken(rows[0].user_id, rows[0].password_hash);
-    await sendPasswordResetEmail(normalizedEmail, resetToken);
+    try {
+      await sendPasswordResetEmail(normalizedEmail, resetToken);
+    } catch (err) {
+      // Answer the same way as for an unknown email, so a failed send can't
+      // reveal which addresses are registered. The cause goes to the log.
+      console.error('Password reset email failed to send:', err.message);
+    }
   }
   res.status(200).json({ ok: true });
 }));
@@ -82,7 +94,9 @@ router.post('/forgot-password', asyncHandler(async (req, res) => {
 router.post('/reset-password', asyncHandler(async (req, res) => {
   const { token, newPassword } = req.body;
   if (!token || !newPassword) throw new ApiError(400, 'token and newPassword are required.');
-  if (newPassword.length < 8) throw new ApiError(400, 'Password must be at least 8 characters.');
+  if (String(newPassword).length < MIN_PASSWORD_LENGTH) {
+    throw new ApiError(400, `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  }
 
   const { userId, pwv } = verifyResetToken(token);
   const [rows] = await pool.query('SELECT password_hash FROM users WHERE user_id = ?', [userId]);
