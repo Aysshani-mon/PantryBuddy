@@ -1,15 +1,17 @@
 // Iteration 3 logic tests (TC32–TC41 in the Testing & Bug Log).
 // Runs the real backend modules against the data team's real CSVs.
-// Usage, from the repo root:  node pantrybuddy-backend/tests/iteration3_logic_tests.js
+// Usage, from the repo root:  node Backend/tests/iteration3_logic_tests.js
 // No database or network needed. Exits with code 1 if any test fails.
 const fs = require('fs');
 const path = require('path');
 const rootArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
 const ROOT = rootArg ? path.resolve(rootArg) : path.resolve(__dirname, '../..');
-// Works before and after the folder clean-up (src/util -> src/services).
+// The backend folder is the one this script sits in (Backend/tests/..), so
+// renaming the folder does not break the tests.
+const BACKEND = path.resolve(__dirname, '..');
 const U = (m) => {
   for (const dir of ['services', 'util']) {
-    const p = path.join(ROOT, 'pantrybuddy-backend/src', dir, `${m}.js`);
+    const p = path.join(BACKEND, 'src', dir, `${m}.js`);
     if (fs.existsSync(p)) return require(p);
   }
   throw new Error(`Module not found: ${m}`);
