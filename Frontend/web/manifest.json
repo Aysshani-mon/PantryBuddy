@@ -1,11 +1,11 @@
 {
-    "name": "pantrybuddy",
-    "short_name": "pantrybuddy",
+    "name": "PantrySentry",
+    "short_name": "PantrySentry",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F8F2E6",
+    "theme_color": "#1F6527",
+    "description": "Track your household food, use it before it expires and waste less.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

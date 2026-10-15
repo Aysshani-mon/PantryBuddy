@@ -104,7 +104,7 @@ class _PantryBuddyAppState extends State<PantryBuddyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       scaffoldMessengerKey: _messengerKey,
-      title: 'PantryBuddy',
+      title: 'PantrySentry',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       home: ListenableBuilder(
